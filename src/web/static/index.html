@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BeyondRAG | Enterprise RBAC &amp; Cross-Lingual RAG</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            slate: { 850: '#151f32', 925: '#0b1120', 950: '#060a14' }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #060a14; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-indigo-500 selection:text-white">
+
+  <!-- Minimal Sleek Top Bar -->
+  <header class="border-b border-slate-800/80 bg-slate-925/95 backdrop-blur sticky top-0 z-30">
+    <div class="max-w-[1380px] mx-auto px-5 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-500 flex items-center justify-center font-black text-white text-base shadow-lg shadow-indigo-500/20">
+          BR
+        </div>
+        <h1 class="text-lg font-extrabold tracking-tight text-white">BeyondRAG</h1>
+      </div>
+
+      <!-- Active Role Switcher -->
+      <div class="flex flex-wrap items-center gap-2 bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2">
+        <span class="text-xs font-bold uppercase tracking-wider text-slate-400 mr-1">Role:</span>
+        <button onclick="setRolePreset([])" id="presetPublicBtn" class="px-3.5 py-1.5 rounded-lg text-sm font-bold transition border">
+          Public Only
+        </button>
+        <button onclick="setRolePreset(['finance'])" id="presetFinanceBtn" class="px-3.5 py-1.5 rounded-lg text-sm font-bold transition border">
+          Finance Role
+        </button>
+        <button onclick="setRolePreset(['operation'])" id="presetOperationBtn" class="px-3.5 py-1.5 rounded-lg text-sm font-bold transition border">
+          Operation Role
+        </button>
+        <button onclick="setRolePreset(['finance', 'operation'])" id="presetAllBtn" class="px-3.5 py-1.5 rounded-lg text-sm font-bold transition border">
+          All Roles
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main 2-Section Layout: (1) PDF Upload & Knowledge Base + (2) Multi-Lingual Chat -->
+  <main class="max-w-[1380px] w-full mx-auto px-5 py-5 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5">
+
+    <!-- SECTION 1: PDF UPLOAD & KNOWLEDGE BASE LIST (5 cols) -->
+    <section class="lg:col-span-5 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col gap-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-base font-extrabold text-white uppercase tracking-wider flex items-center gap-2">
+          <span class="w-3 h-3 rounded-full bg-indigo-400"></span>
+          1. PDF Upload &amp; Knowledge Base
+        </h2>
+        <span id="uploadAccessPreview" class="px-3 py-1 rounded-full text-xs font-bold"></span>
+      </div>
+
+      <!-- Compact Upload & Tag Bar -->
+      <div class="bg-slate-950/90 border border-slate-800 rounded-xl p-4 space-y-3.5">
+        <div id="dropZone"
+             onclick="document.getElementById('pdfFileInput').click()"
+             class="border border-dashed border-slate-700 hover:border-indigo-500 rounded-lg px-3.5 py-3 text-center cursor-pointer transition bg-slate-900/60 flex items-center justify-between gap-2">
+          <input type="file" id="pdfFileInput" accept=".pdf,application/pdf" class="hidden" onchange="handleFileSelect(event)" />
+          <span id="selectedFileLabel" class="text-sm font-semibold text-slate-200 truncate">
+            📄 Select PDF to Upload
+          </span>
+          <span class="px-2.5 py-1 rounded bg-slate-800 text-xs font-bold text-slate-300 shrink-0">Browse</span>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-xs font-bold text-slate-400">Tag:</span>
+            <div id="uploadTagPills" class="flex flex-wrap gap-2"></div>
+          </div>
+
+          <button id="uploadSubmitBtn"
+                  onclick="submitPdfUpload()"
+                  class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-extrabold text-white shadow transition">
+            Upload PDF
+          </button>
+        </div>
+        <div id="uploadStatusMsg" class="text-xs font-semibold text-slate-300 empty:hidden"></div>
+      </div>
+
+      <!-- Knowledge Base Uploaded PDFs List -->
+      <div class="flex-1 flex flex-col min-h-0">
+        <div class="flex items-center justify-between mb-2.5">
+          <span class="text-xs font-extrabold uppercase tracking-wider text-slate-400">
+            Knowledge Base PDFs
+          </span>
+          <span id="chatRoleBanner" class="text-xs font-bold text-cyan-400"></span>
+        </div>
+        <div id="documentsList" class="space-y-2.5 overflow-y-auto pr-1"></div>
+      </div>
+    </section>
+
+    <!-- SECTION 2: MULTI-LINGUAL RBAC CHAT (7 cols) -->
+    <section class="lg:col-span-7 bg-slate-900/80 border border-slate-800 rounded-2xl shadow-xl flex flex-col overflow-hidden min-h-[640px]">
+
+      <!-- Pre-Generated Multi-Lingual Query Chips -->
+      <div class="p-4 border-b border-slate-800 bg-slate-925/70 space-y-3">
+        <div class="flex items-center justify-between">
+          <h2 class="text-base font-extrabold text-white uppercase tracking-wider flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-cyan-400"></span>
+            2. Multi-Lingual RBAC Chat
+          </h2>
+          <select id="synthesisModeSelect" class="hidden">
+            <option value="fast">Instant</option>
+          </select>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-xs font-extrabold text-cyan-400 mr-1">中文 → EN PDF:</span>
+          <button onclick="runQuickPrompt('八號風球及混合辦公考勤政策是什麼？')"
+                  class="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-sm font-bold text-emerald-300 transition">
+            [Public 公開] 八號風球政策
+          </button>
+          <button onclick="runQuickPrompt('最低港元現金儲備緩衝是多少？外匯遠期合約限額是多少？')"
+                  class="px-3 py-1.5 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/35 text-sm font-bold text-indigo-300 transition">
+            [Finance 財務標籤] 最低港元現金儲備
+          </button>
+          <button onclick="runQuickPrompt('葵青貨櫃碼頭的準時調度SLA和冷鏈溫度是多少？')"
+                  class="px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-sm font-bold text-amber-300 transition">
+            [Operation 營運標籤] 葵青貨櫃碼頭SLA
+          </button>
+        </div>
+      </div>
+
+      <!-- Clean Chat Stream -->
+      <div id="chatMessages" class="flex-1 p-5 space-y-3.5 overflow-y-auto"></div>
+
+      <!-- Chat Input -->
+      <form onsubmit="handleChatSubmit(event)" class="p-4 border-t border-slate-800 bg-slate-925/80 flex gap-2.5">
+        <input id="chatInput"
+               type="text"
+               placeholder="Click a query above or ask in Chinese / English..."
+               class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm font-medium text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
+        <button id="chatSendBtn"
+                type="submit"
+                class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-sm font-extrabold text-white shadow transition">
+          Ask KB
+        </button>
+      </form>
+    </section>
+  </main>
+
+  <script>
+    let availableTags = ['finance', 'operation'];
+    let selectedUploadTags = new Set();
+    let activeUserRoles = new Set();
+    let documents = [];
+    let selectedPdfFile = null;
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      renderUploadTagPills();
+      updateUploadAccessPreview();
+      await fetchDocumentsAndTags();
+      renderUserRoleControls();
+    });
+
+    function handleFileSelect(event) {
+      const files = event.target.files;
+      if (files && files.length > 0) {
+        selectedPdfFile = files[0];
+        document.getElementById('selectedFileLabel').innerHTML =
+          `📄 <span class="text-emerald-400 font-extrabold">${escapeHtml(selectedPdfFile.name)}</span>`;
+      }
+    }
+
+    function toggleUploadTag(tag) {
+      if (selectedUploadTags.has(tag)) selectedUploadTags.delete(tag);
+      else selectedUploadTags.add(tag);
+      renderUploadTagPills();
+      updateUploadAccessPreview();
+    }
+
+    function renderUploadTagPills() {
+      const container = document.getElementById('uploadTagPills');
+      container.innerHTML = availableTags.map(tag => {
+        const active = selectedUploadTags.has(tag);
+        const cls = active
+          ? 'bg-indigo-600 text-white border-indigo-400 shadow-sm'
+          : 'bg-slate-900 text-slate-300 border-slate-700 hover:text-white';
+        return `
+          <button type="button"
+                  onclick="toggleUploadTag('${escapeHtml(tag)}')"
+                  class="px-3 py-1.5 rounded-lg text-sm font-bold border transition flex items-center gap-1.5 ${cls}">
+            <span>${active ? '✓' : '+'}</span>
+            <span>${escapeHtml(tag)}</span>
+          </button>
+        `;
+      }).join('');
+    }
+
+    function updateUploadAccessPreview() {
+      const badge = document.getElementById('uploadAccessPreview');
+      const tags = Array.from(selectedUploadTags);
+      if (tags.length === 0) {
+        badge.className = 'px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
+        badge.textContent = 'PUBLIC';
+      } else {
+        badge.className = 'px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40';
+        badge.textContent = `Tag: ${tags.join(', ')}`;
+      }
+    }
+
+    function setRolePreset(rolesArray) {
+      activeUserRoles = new Set(rolesArray);
+      renderUserRoleControls();
+      renderDocumentsList();
+    }
+
+    function renderUserRoleControls() {
+      const roles = Array.from(activeUserRoles);
+      const isPublicOnly = roles.length === 0;
+      const isFinOnly = roles.length === 1 && roles[0] === 'finance';
+      const isOpOnly = roles.length === 1 && roles[0] === 'operation';
+      const isBoth = roles.includes('finance') && roles.includes('operation') && roles.length === 2;
+
+      const setBtnStyle = (id, active) => {
+        const el = document.getElementById(id);
+        el.className = active
+          ? 'px-3.5 py-1.5 rounded-lg text-sm font-extrabold transition border bg-cyan-500/25 border-cyan-400 text-cyan-200 shadow-sm'
+          : 'px-3.5 py-1.5 rounded-lg text-sm font-semibold transition border bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200';
+      };
+      setBtnStyle('presetPublicBtn', isPublicOnly);
+      setBtnStyle('presetFinanceBtn', isFinOnly);
+      setBtnStyle('presetOperationBtn', isOpOnly);
+      setBtnStyle('presetAllBtn', isBoth);
+
+      const banner = document.getElementById('chatRoleBanner');
+      banner.textContent = roles.length === 0
+        ? 'Role: Public Only'
+        : `Role: ${roles.join(' + ')}`;
+    }
+
+    async function fetchDocumentsAndTags() {
+      const resp = await fetch('/api/documents');
+      const data = await resp.json();
+      documents = data.documents || [];
+      renderUploadTagPills();
+      renderUserRoleControls();
+      renderDocumentsList();
+    }
+
+    async function submitPdfUpload() {
+      const statusEl = document.getElementById('uploadStatusMsg');
+      const btn = document.getElementById('uploadSubmitBtn');
+      if (!selectedPdfFile) return;
+
+      btn.disabled = true;
+      statusEl.innerHTML = `<span class="text-cyan-400">Indexing...</span>`;
+      try {
+        const formData = new FormData();
+        formData.append('file', selectedPdfFile);
+        formData.append('tags', Array.from(selectedUploadTags).join(','));
+        const resp = await fetch('/api/upload', { method: 'POST', body: formData });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || 'Upload failed');
+        statusEl.innerHTML = `<span class="text-emerald-400">✓ Added ${escapeHtml(data.document.filename)}</span>`;
+        selectedPdfFile = null;
+        document.getElementById('pdfFileInput').value = '';
+        await fetchDocumentsAndTags();
+      } catch (err) {
+        statusEl.innerHTML = `<span class="text-rose-400">${escapeHtml(err.message)}</span>`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function canCurrentUserAccessDoc(doc) {
+      if (doc.is_public || !doc.tags || doc.tags.length === 0) return true;
+      return doc.tags.some(t => activeUserRoles.has(t));
+    }
+
+    function renderDocumentsList() {
+      const container = document.getElementById('documentsList');
+      container.innerHTML = documents.map(doc => {
+        const accessible = canCurrentUserAccessDoc(doc);
+        const statusPill = accessible
+          ? `<span class="px-2.5 py-1 rounded-lg text-xs font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/35 shrink-0">✓ Unlocked</span>`
+          : `<span class="px-2.5 py-1 rounded-lg text-xs font-extrabold bg-rose-500/20 text-rose-300 border border-rose-500/35 shrink-0">🔒 Locked</span>`;
+
+        const tagPills = (doc.is_public || !doc.tags || doc.tags.length === 0)
+          ? `<span class="px-2 py-0.5 rounded text-xs font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">PUBLIC</span>`
+          : doc.tags.map(t => `<span class="px-2 py-0.5 rounded text-xs font-mono font-bold bg-indigo-500/25 text-indigo-300 border border-indigo-500/35">${escapeHtml(t)}</span>`).join(' ');
+
+        return `
+          <div class="px-4 py-3 rounded-xl border transition flex items-center justify-between gap-3 ${accessible ? 'bg-slate-950/95 border-slate-800' : 'bg-slate-950/45 border-slate-900 opacity-65'}">
+            <div class="min-w-0 flex-1">
+              <div class="text-sm font-extrabold text-white truncate">${escapeHtml(doc.filename)}</div>
+              <div class="flex items-center gap-2 mt-1">
+                ${tagPills}
+              </div>
+            </div>
+            ${statusPill}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function runQuickPrompt(text) {
+      const input = document.getElementById('chatInput');
+      input.value = text;
+      handleChatSubmit(new Event('submit'));
+    }
+
+    async function handleChatSubmit(event) {
+      if (event.preventDefault) event.preventDefault();
+      const input = document.getElementById('chatInput');
+      const question = (input.value || '').trim();
+      if (!question) return;
+
+      const roles = Array.from(activeUserRoles);
+      const synthesisMode = document.getElementById('synthesisModeSelect').value;
+      const messagesContainer = document.getElementById('chatMessages');
+      const sendBtn = document.getElementById('chatSendBtn');
+
+      const roleBadge = roles.length
+        ? roles.map(r => `<span class="px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200 text-xs font-mono font-bold">${escapeHtml(r)}</span>`).join(' ')
+        : `<span class="px-2 py-0.5 rounded bg-emerald-500/25 text-emerald-200 text-xs font-mono font-bold">public</span>`;
+
+      messagesContainer.insertAdjacentHTML('beforeend', `
+        <div class="flex justify-end">
+          <div class="max-w-[90%] bg-indigo-600/25 border border-indigo-500/40 rounded-2xl px-4 py-2.5 text-sm text-white flex items-center gap-2">
+            ${roleBadge}
+            <span class="font-bold">${escapeHtml(question)}</span>
+          </div>
+        </div>
+      `);
+
+      input.value = '';
+      sendBtn.disabled = true;
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+      try {
+        const resp = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question, user_roles: roles, top_k: 4, synthesis_mode: synthesisMode })
+        });
+        const data = await resp.json();
+        appendAssistantResponse(data);
+      } finally {
+        sendBtn.disabled = false;
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      }
+    }
+
+    function appendAssistantResponse(data) {
+      const messagesContainer = document.getElementById('chatMessages');
+      const isBlocked = (data.answer || '').includes('🔒');
+      const cardBorder = isBlocked ? 'border-rose-500/50 bg-rose-950/25' : 'border-emerald-500/45 bg-slate-950/95';
+
+      messagesContainer.insertAdjacentHTML('beforeend', `
+        <div class="border-2 rounded-2xl p-4 space-y-2 ${cardBorder}">
+          <div class="text-sm text-slate-100 leading-relaxed font-medium">
+            ${formatSimpleMarkdown(data.answer || '')}
+          </div>
+        </div>
+      `);
+    }
+
+    function formatSimpleMarkdown(text) {
+      return escapeHtml(text)
+        .replace(/\*\*(.+?)\*\*/g, '<strong class="text-white font-extrabold">$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em class="text-slate-300">$1</em>')
+        .replace(/`([^`]+)`/g, '<code class="px-2 py-0.5 rounded bg-slate-800 text-cyan-300 font-mono text-xs font-bold">$1</code>')
+        .replace(/\n/g, '<br/>');
+    }
+
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+  </script>
+</body>
+</html>

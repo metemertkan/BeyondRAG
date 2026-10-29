@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.env
+
+# Workspace runtime uploads (keep directory structure via .gitkeep)
+workspace/uploads/*.pdf
+!workspace/.gitkeep
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store

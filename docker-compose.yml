@@ -1,0 +1,56 @@
+services:
+  beyondrag-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: beyondrag_app
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      - WEB_HOST=0.0.0.0
+      - WEB_PORT=8090
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - USE_LOCAL_ONLY=${USE_LOCAL_ONLY:-false}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./workspace:/app/workspace
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: beyondrag_elasticsearch
+    restart: unless-stopped
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsSL http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: beyondrag_ollama
+    profiles:
+      - container-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  es_data:
+  ollama_data:
