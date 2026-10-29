@@ -1,164 +1,27 @@
-"""Hybrid Retrieval & Storage Adapter for Elasticsearch 8.15 (`BM25 + int8_hnsw`).
+"""Component 6: Hybrid Retrieval (`BM25 + int8_hnsw`) & RBAC Mask Auditing.
 
-Implements `ChunkStorePort` with an automatic in-memory fallback when Elasticsearch
-is offline (e.g. unit tests). All Elasticsearch-specific index mappings, slowlog
-settings, Painless scripts, and pre-filtered kNN + BM25 queries live strictly here.
+Handles exclusively executing pre-filtered hybrid queries against Elasticsearch 8.15
+(or in-memory fallback) and auditing restricted documents masked by the RBAC filter.
 """
 
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, Final, List, Sequence
+from typing import Any, Dict, List
 
-from elasticsearch import Elasticsearch
-
-from src.config import ELASTICSEARCH_URL
 from src.rag.acl import PUBLIC_SENTINEL_TAG, extract_visible_tags
-from src.rag.embeddings import EMBEDDING_DIMS, STOPWORDS, has_cjk
+from src.rag.embeddings import STOPWORDS, has_cjk
+from src.rag.es_client import ElasticsearchIndexManager
 from src.rag.ports import HybridSearchOutcome
 
-KB_INDEX_NAME: Final[str] = "hk-rbac-rag-kb"
 
+class HybridRetriever:
+    """Executes pre-filtered hybrid (`BM25 + int8_hnsw`) retrieval and RBAC mask auditing."""
 
-class ElasticsearchHybridStore:
-    """Elasticsearch 8.15 adapter implementing `ChunkStorePort` for pre-filtered hybrid RAG."""
+    def __init__(self, es_manager: ElasticsearchIndexManager) -> None:
+        self.es_manager = es_manager
 
-    def __init__(
-        self,
-        es_url: str = ELASTICSEARCH_URL,
-        index_name: str = KB_INDEX_NAME,
-    ) -> None:
-        self._es_url = es_url
-        self.index_name = index_name
-        self.es = Elasticsearch(self._es_url, request_timeout=5, max_retries=1)
-        self._memory_chunks: List[Dict[str, Any]] = []
-        self._ensure_index()
-
-    @property
-    def backend_url(self) -> str:
-        return self._es_url
-
-    def is_online(self) -> bool:
-        try:
-            return bool(self.es.ping())
-        except Exception:
-            return False
-
-    def _ensure_index(self) -> None:
-        if not self.is_online():
-            return
-        if not self.es.indices.exists(index=self.index_name):
-            self.es.indices.create(
-                index=self.index_name,
-                settings={
-                    "index.search.slowlog.threshold.query.warn": "0ms",
-                    "index.search.slowlog.threshold.fetch.warn": "0ms",
-                },
-                mappings={
-                    "properties": {
-                        "chunk_id": {"type": "keyword"},
-                        "doc_id": {"type": "keyword"},
-                        "filename": {"type": "keyword"},
-                        "title": {"type": "text"},
-                        "page_number": {"type": "integer"},
-                        "chunk_index": {"type": "integer"},
-                        "content": {"type": "text"},
-                        "is_public": {"type": "boolean"},
-                        "acl_tags": {"type": "keyword"},
-                        "uploaded_at": {"type": "keyword"},
-                        "embedding": {
-                            "type": "dense_vector",
-                            "dims": EMBEDDING_DIMS,
-                            "index": True,
-                            "similarity": "cosine",
-                            "index_options": {
-                                "type": "int8_hnsw",
-                                "m": 16,
-                                "ef_construction": 100,
-                            },
-                        },
-                    }
-                },
-            )
-
-    def index_chunks(self, chunks: Sequence[Dict[str, Any]]) -> None:
-        if self.is_online():
-            self._ensure_index()
-            for rec in chunks:
-                self.es.index(
-                    index=self.index_name,
-                    id=rec["chunk_id"],
-                    document=rec,
-                )
-            self.es.indices.refresh(index=self.index_name)
-        else:
-            self._memory_chunks.extend(chunks)
-
-    def list_all_chunk_metadata(self) -> List[Dict[str, Any]]:
-        if self.is_online():
-            self._ensure_index()
-            resp = self.es.search(
-                index=self.index_name,
-                size=1000,
-                _source=[
-                    "doc_id",
-                    "filename",
-                    "page_number",
-                    "is_public",
-                    "acl_tags",
-                    "uploaded_at",
-                ],
-                query={"match_all": {}},
-            )
-            return [h["_source"] for h in resp["hits"]["hits"]]
-        return list(self._memory_chunks)
-
-    def update_document_acl(
-        self,
-        doc_id: str,
-        acl_tags: List[str],
-        is_public: bool,
-    ) -> None:
-        if self.is_online():
-            self._ensure_index()
-            self.es.update_by_query(
-                index=self.index_name,
-                query={"term": {"doc_id": doc_id}},
-                script={
-                    "source": "ctx._source.acl_tags = params.acl_tags; ctx._source.is_public = params.is_public;",
-                    "lang": "painless",
-                    "params": {
-                        "acl_tags": acl_tags,
-                        "is_public": is_public,
-                    },
-                },
-                refresh=True,
-            )
-        else:
-            for rec in self._memory_chunks:
-                if rec["doc_id"] == doc_id:
-                    rec["acl_tags"] = acl_tags
-                    rec["is_public"] = is_public
-
-    def delete_document_chunks(self, doc_id: str) -> None:
-        if self.is_online():
-            self._ensure_index()
-            self.es.delete_by_query(
-                index=self.index_name,
-                query={"term": {"doc_id": doc_id}},
-                refresh=True,
-            )
-        self._memory_chunks = [
-            c for c in self._memory_chunks if c.get("doc_id") != doc_id
-        ]
-
-    def reset_store(self) -> None:
-        if self.is_online() and self.es.indices.exists(index=self.index_name):
-            self.es.indices.delete(index=self.index_name)
-        self._memory_chunks.clear()
-        self._ensure_index()
-
-    def hybrid_search(
+    def search(
         self,
         expanded_query: str,
         query_vector: List[float],
@@ -190,10 +53,10 @@ class ElasticsearchHybridStore:
         authorized_chunks: List[Dict[str, Any]] = []
         masked_restricted_docs: List[Dict[str, Any]] = []
 
-        if self.is_online():
-            self._ensure_index()
-            resp = self.es.search(
-                index=self.index_name,
+        if self.es_manager.is_online():
+            self.es_manager.ensure_index()
+            resp = self.es_manager.client.search(
+                index=self.es_manager.index_name,
                 size=top_k,
                 query={
                     "bool": {
@@ -238,8 +101,8 @@ class ElasticsearchHybridStore:
                 and w.lower().strip("?.,!\"'()？，。！") not in STOPWORDS
                 and not has_cjk(w)
             )
-            unfiltered_resp = self.es.search(
-                index=self.index_name,
+            unfiltered_resp = self.es_manager.client.search(
+                index=self.es_manager.index_name,
                 size=10,
                 _source=["doc_id", "filename", "page_number", "acl_tags", "is_public"],
                 query={
@@ -273,7 +136,7 @@ class ElasticsearchHybridStore:
                     }
                 )
         else:
-            for rec in self._memory_chunks:
+            for rec in self.es_manager.memory_chunks:
                 rec_tags = set(rec.get("acl_tags", [PUBLIC_SENTINEL_TAG]))
                 if rec_tags.intersection(effective_acl_tags):
                     score = sum(a * b for a, b in zip(query_vector, rec["embedding"]))

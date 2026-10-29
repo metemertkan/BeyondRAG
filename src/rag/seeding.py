@@ -1,26 +1,19 @@
-"""Demo Document Seeding & PDF I/O Adapter for BeyondRAG.
+"""Component 7: Demo Document Seeding (`DemoDocumentSeeder`).
 
-Separates `pypdf` extraction, `reportlab` PDF generation, and the 4 enterprise
-demo PDFs from the core RAG domain service.
+Generates the 4 enterprise sample PDFs in memory using ReportLab and seeds them
+into the RAG knowledge base without coupling demo fixtures to the domain service.
 """
 
 from __future__ import annotations
 
 import io
-from pathlib import Path
-from typing import Any, Dict, Final, List, Protocol, Tuple
+from typing import Any, Dict, Final, List, Protocol
 
-from pypdf import PdfReader
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-from src.config import WORKSPACE_DIR
 
-UPLOADS_DIR: Final[Path] = WORKSPACE_DIR / "uploads"
-UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-
-
-class _IngestTarget(Protocol):
+class _SeedTarget(Protocol):
     def list_documents(self) -> List[Dict[str, Any]]:
         ...
 
@@ -32,33 +25,6 @@ class _IngestTarget(Protocol):
         doc_id: str | None = None,
     ) -> Dict[str, Any]:
         ...
-
-
-class LocalPdfTextExtractor:
-    """Adapter implementing `PdfTextExtractorPort` using `pypdf` and local filesystem storage."""
-
-    def __init__(self, uploads_dir: Path = UPLOADS_DIR) -> None:
-        self.uploads_dir = uploads_dir
-        self.uploads_dir.mkdir(parents=True, exist_ok=True)
-
-    def save_upload(self, doc_id: str, filename: str, pdf_bytes: bytes) -> None:
-        safe_filename = Path(filename).name
-        saved_path = self.uploads_dir / f"{doc_id}_{safe_filename}"
-        saved_path.write_bytes(pdf_bytes)
-
-    def delete_upload(self, doc_id: str) -> None:
-        for file_path in self.uploads_dir.glob(f"{doc_id}_*"):
-            file_path.unlink(missing_ok=True)
-
-    def extract_pages(self, pdf_bytes: bytes) -> Tuple[int, List[Tuple[int, str]]]:
-        reader = PdfReader(io.BytesIO(pdf_bytes))
-        total_pages = len(reader.pages)
-        page_texts: List[Tuple[int, str]] = []
-        for page_num, page in enumerate(reader.pages, start=1):
-            extracted_text = (page.extract_text() or "").strip()
-            if extracted_text:
-                page_texts.append((page_num, extracted_text))
-        return total_pages, page_texts
 
 
 def create_pdf_bytes(title: str, pages: List[List[str]]) -> bytes:
@@ -170,20 +136,22 @@ DEMO_ENTERPRISE_SAMPLES: Final[List[Dict[str, Any]]] = [
 ]
 
 
-def seed_demo_pdfs(service: _IngestTarget) -> List[Dict[str, Any]]:
-    """Seed the 4 English enterprise demo PDFs into the given RAG service if not already indexed."""
-    existing_filenames = {d["filename"] for d in service.list_documents()}
-    seeded: List[Dict[str, Any]] = []
+class DemoDocumentSeeder:
+    """Seeds the 4 sample enterprise PDFs into any target implementing `_SeedTarget`."""
 
-    for sample in DEMO_ENTERPRISE_SAMPLES:
-        if sample["filename"] in existing_filenames:
-            continue
-        pdf_bytes = create_pdf_bytes(sample["filename"], sample["pages"])
-        meta = service.ingest_pdf_bytes(
-            filename=sample["filename"],
-            pdf_bytes=pdf_bytes,
-            tags=sample["tags"],
-        )
-        seeded.append(meta)
+    def seed(self, service: _SeedTarget) -> List[Dict[str, Any]]:
+        existing_filenames = {d["filename"] for d in service.list_documents()}
+        seeded: List[Dict[str, Any]] = []
 
-    return seeded
+        for sample in DEMO_ENTERPRISE_SAMPLES:
+            if sample["filename"] in existing_filenames:
+                continue
+            pdf_bytes = create_pdf_bytes(sample["filename"], sample["pages"])
+            meta = service.ingest_pdf_bytes(
+                filename=sample["filename"],
+                pdf_bytes=pdf_bytes,
+                tags=sample["tags"],
+            )
+            seeded.append(meta)
+
+        return seeded

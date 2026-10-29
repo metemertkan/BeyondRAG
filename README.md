@@ -69,14 +69,19 @@ BeyondRAG/
 ├── src/
 │   ├── config.py             # Environment & Dual-LLM router (Gemini + Ollama fallback)
 │   ├── rag/
-│   │   ├── acl.py            # Pure Domain: RBAC tag normalization & ACL resolution
-│   │   ├── ports.py          # Pure Domain: Protocol interfaces (ChunkStore, CrossLingual, Synthesizer) & chunking
-│   │   ├── service.py        # Pure Domain: Orchestration service (zero ES/Gemini/Ollama/FastAPI imports)
-│   │   ├── retriever.py      # Adapter: Elasticsearch 8.15 Pre-Filtered Hybrid Search (BM25 + int8_hnsw)
-│   │   ├── cross_lingual.py  # Adapter: Cross-Lingual (EN <-> ZH) query preparation & LLM fallback
-│   │   ├── embeddings.py     # Adapter: Dynamic Ollama Ingestion-Time EN<->ZH Concept Extractor & Embedder
-│   │   ├── synthesizer.py    # Adapter: Grounded answer & RBAC block synthesis
-│   │   └── seeding.py        # Adapter: Demo PDF generation (ReportLab) & PyPDF extraction
+│   │   ├── service.py        # Thin Domain Facade (delegates to injected ports; zero infra imports)
+│   │   ├── ports.py          # Pure Domain: Protocol interfaces for all 11 RAG components
+│   │   ├── acl.py            # 1. ACL Management (pure domain RBAC tag normalization & resolution)
+│   │   ├── chunker.py        # 2. Chunking (pure domain sentence/word boundary text chunker)
+│   │   ├── ingestor.py       # 3. PDF Ingestion (pure domain ingestion pipeline coordinator)
+│   │   ├── es_client.py      # 4. ES Connection & Index Management (int8_hnsw + slowlog lifecycle)
+│   │   ├── extractor.py      # 5. Text Extraction (per-page PDF text extraction via pypdf)
+│   │   ├── embeddings.py     # 6. Embedding & Dynamic Ollama Ingestion-Time EN<->ZH Concept Extractor
+│   │   ├── repository.py     # 7. Document Persistence (ES chunk indexing, tag updates, upload files)
+│   │   ├── retriever.py      # 8. Hybrid Retrieval (ES 8.15 Pre-Filtered BM25 + int8_hnsw & mask audit)
+│   │   ├── cross_lingual.py  # 9. Cross-Lingual Query Handling (EN<->ZH expansion & LLM fallback)
+│   │   ├── synthesizer.py    # 10. Answer Synthesis (grounded citations & RBAC block notices)
+│   │   └── seeding.py        # 11. Demo Document Seeding (ReportLab PDF generation & sample seeding)
 │   └── web/
 │       ├── app.py            # REST API endpoints (/api/upload, /api/documents, /api/chat)
 │       └── static/

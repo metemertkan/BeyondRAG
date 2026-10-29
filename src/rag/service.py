@@ -1,112 +1,180 @@
-"""Pure Domain Orchestration Service for BeyondRAG.
+"""Thin Domain Facade for BeyondRAG (`RBACKnowledgeBaseService`).
 
-Coordinates ACL management (`acl.py`), text chunking (`ports.py`), and injected
-ports (`ChunkStorePort`, `CrossLingualPort`, `AnswerSynthesizerPort`, `PdfTextExtractorPort`)
-without depending directly on Elasticsearch, Gemini, Ollama, or FastAPI.
+Delegates each responsibility to a dedicated, single-responsibility component via
+domain ports (zero direct dependency on Elasticsearch, Gemini, Ollama, PyPDF,
+ReportLab, or FastAPI):
+  1. Index & Connection Management -> `IndexManagerPort` (`es_client.py`)
+  2. PDF Ingestion                 -> `PdfIngestorPort` (`ingestor.py`)
+  3. Text Extraction               -> `PdfTextExtractorPort` (`extractor.py`)
+  4. Chunking                      -> `ChunkerPort` (`chunker.py`)
+  5. Embedding                     -> `EmbedderPort` (`embeddings.py`)
+  6. Document Persistence          -> `DocumentRepositoryPort` (`repository.py`)
+  7. ACL Management                -> `acl.py`
+  8. Hybrid Retrieval              -> `HybridRetrieverPort` (`retriever.py`)
+  9. Cross-Lingual Query Handling  -> `CrossLingualPort` (`cross_lingual.py`)
+  10. Answer Synthesis             -> `AnswerSynthesizerPort` (`synthesizer.py`)
+  11. Demo Document Seeding        -> `DemoSeederPort` (`seeding.py`)
 """
 
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Callable, Dict, Final, List
+from typing import Any, Dict, Final, List
 
 from src.rag.acl import (
     PUBLIC_SENTINEL_TAG,
     build_effective_acl_tags,
     collect_available_tags,
-    extract_visible_tags,
     normalize_tags,
     resolve_document_acl,
 )
 from src.rag.ports import (
     AnswerSynthesizerPort,
-    ChunkStorePort,
     CrossLingualPort,
-    PdfTextExtractorPort,
-    chunk_text,
+    DemoSeederPort,
+    DocumentRepositoryPort,
+    EmbedderPort,
+    HybridRetrieverPort,
+    IndexManagerPort,
+    PdfIngestorPort,
 )
 
 KB_INDEX_NAME: Final[str] = "hk-rbac-rag-kb"
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _build_default_adapters(
+def _wire_default_components(
     es_url: str | None = None,
 ) -> tuple[
-    ChunkStorePort,
+    IndexManagerPort,
+    DocumentRepositoryPort,
+    PdfIngestorPort,
     CrossLingualPort,
+    EmbedderPort,
+    HybridRetrieverPort,
     AnswerSynthesizerPort,
-    PdfTextExtractorPort,
-    Callable[[Any], List[Dict[str, Any]]],
+    DemoSeederPort,
 ]:
-    """Composition root helper that wires default infrastructure adapters."""
+    """Composition root wiring the concrete infrastructure adapters."""
     from src.config import ELASTICSEARCH_URL
+    from src.rag.chunker import TextChunker
     from src.rag.cross_lingual import DefaultCrossLingualAdapter
-    from src.rag.retriever import ElasticsearchHybridStore
-    from src.rag.seeding import LocalPdfTextExtractor, seed_demo_pdfs
+    from src.rag.embeddings import CrossLingualEmbedder
+    from src.rag.es_client import ElasticsearchIndexManager
+    from src.rag.extractor import PdfTextExtractor
+    from src.rag.ingestor import PdfIngestor
+    from src.rag.repository import DocumentRepository
+    from src.rag.retriever import HybridRetriever
+    from src.rag.seeding import DemoDocumentSeeder
     from src.rag.synthesizer import GroundedAnswerSynthesizer
 
-    resolved_url = es_url or ELASTICSEARCH_URL
+    es_manager = ElasticsearchIndexManager(
+        es_url=es_url or ELASTICSEARCH_URL,
+        index_name=KB_INDEX_NAME,
+    )
+    extractor = PdfTextExtractor()
+    chunker = TextChunker()
+    cross_lingual = DefaultCrossLingualAdapter()
+    embedder = CrossLingualEmbedder()
+    repository = DocumentRepository(es_manager=es_manager)
+    ingestor = PdfIngestor(
+        extractor=extractor,
+        chunker=chunker,
+        cross_lingual=cross_lingual,
+        embedder=embedder,
+        repository=repository,
+    )
+    retriever = HybridRetriever(es_manager=es_manager)
+    synthesizer = GroundedAnswerSynthesizer()
+    seeder = DemoDocumentSeeder()
     return (
-        ElasticsearchHybridStore(es_url=resolved_url, index_name=KB_INDEX_NAME),
-        DefaultCrossLingualAdapter(),
-        GroundedAnswerSynthesizer(),
-        LocalPdfTextExtractor(),
-        seed_demo_pdfs,
+        es_manager,
+        repository,
+        ingestor,
+        cross_lingual,
+        embedder,
+        retriever,
+        synthesizer,
+        seeder,
     )
 
 
 def _create_pdf_bytes(title: str, pages: List[List[str]]) -> bytes:
-    """Backward-compatible wrapper delegating PDF byte generation to `seeding.py`."""
+    """Backward-compatible helper delegating PDF byte generation to `seeding.py`."""
     from src.rag.seeding import create_pdf_bytes
 
     return create_pdf_bytes(title=title, pages=pages)
 
 
 class RBACKnowledgeBaseService:
-    """Domain application service orchestrating RBAC PDF ingestion and Cross-Lingual RAG."""
+    """Thin domain facade coordinating injected RAG ports."""
 
     def __init__(
         self,
         es_url: str | None = None,
         *,
-        store: ChunkStorePort | None = None,
+        index_manager: IndexManagerPort | None = None,
+        repository: DocumentRepositoryPort | None = None,
+        ingestor: PdfIngestorPort | None = None,
         cross_lingual: CrossLingualPort | None = None,
+        embedder: EmbedderPort | None = None,
+        retriever: HybridRetrieverPort | None = None,
         synthesizer: AnswerSynthesizerPort | None = None,
-        pdf_extractor: PdfTextExtractorPort | None = None,
-        demo_seeder: Callable[[Any], List[Dict[str, Any]]] | None = None,
+        seeder: DemoSeederPort | None = None,
     ) -> None:
-        if (
-            store is None
-            or cross_lingual is None
-            or synthesizer is None
-            or pdf_extractor is None
-            or demo_seeder is None
+        if any(
+            c is None
+            for c in (
+                index_manager,
+                repository,
+                ingestor,
+                cross_lingual,
+                embedder,
+                retriever,
+                synthesizer,
+                seeder,
+            )
         ):
-            def_store, def_xl, def_synth, def_pdf, def_seeder = _build_default_adapters(es_url)
-            self._store: ChunkStorePort = store or def_store
-            self._cross_lingual: CrossLingualPort = cross_lingual or def_xl
-            self._synthesizer: AnswerSynthesizerPort = synthesizer or def_synth
-            self._pdf_extractor: PdfTextExtractorPort = pdf_extractor or def_pdf
-            self._demo_seeder = demo_seeder or def_seeder
+            (
+                d_idx,
+                d_repo,
+                d_ing,
+                d_xl,
+                d_emb,
+                d_ret,
+                d_syn,
+                d_seed,
+            ) = _wire_default_components(es_url)
+            self._index_manager: IndexManagerPort = index_manager or d_idx
+            self._repository: DocumentRepositoryPort = repository or d_repo
+            self._ingestor: PdfIngestorPort = ingestor or d_ing
+            self._cross_lingual: CrossLingualPort = cross_lingual or d_xl
+            self._embedder: EmbedderPort = embedder or d_emb
+            self._retriever: HybridRetrieverPort = retriever or d_ret
+            self._synthesizer: AnswerSynthesizerPort = synthesizer or d_syn
+            self._seeder: DemoSeederPort = seeder or d_seed
         else:
-            self._store = store
+            assert index_manager is not None
+            assert repository is not None
+            assert ingestor is not None
+            assert cross_lingual is not None
+            assert embedder is not None
+            assert retriever is not None
+            assert synthesizer is not None
+            assert seeder is not None
+            self._index_manager = index_manager
+            self._repository = repository
+            self._ingestor = ingestor
             self._cross_lingual = cross_lingual
+            self._embedder = embedder
+            self._retriever = retriever
             self._synthesizer = synthesizer
-            self._pdf_extractor = pdf_extractor
-            self._demo_seeder = demo_seeder
+            self._seeder = seeder
 
     @property
     def es_url(self) -> str:
-        return self._store.backend_url
+        return self._index_manager.es_url
 
     def _is_es_online(self) -> bool:
-        return self._store.is_online()
+        return self._index_manager.is_online()
 
     def ingest_pdf_bytes(
         self,
@@ -115,100 +183,17 @@ class RBACKnowledgeBaseService:
         tags: List[str] | str | None = None,
         doc_id: str | None = None,
     ) -> Dict[str, Any]:
-        """Extract text from a PDF, generate cross-lingual concepts, embed, and index with ACL tags."""
-        acl = resolve_document_acl(tags)
-        assigned_doc_id = doc_id or f"doc-{uuid.uuid4().hex[:10]}"
-        safe_filename = Path(filename).name
-        uploaded_at = _utc_now()
-
-        self._pdf_extractor.save_upload(assigned_doc_id, safe_filename, pdf_bytes)
-        total_pages, page_texts = self._pdf_extractor.extract_pages(pdf_bytes)
-
-        if not page_texts:
-            raise ValueError(
-                f"No extractable text found in '{safe_filename}'. Ensure the PDF contains selectable text."
-            )
-
-        full_doc_text = "\n\n".join(text for _, text in page_texts)
-        extracted_concepts, concept_model = self._cross_lingual.extract_concepts_at_ingestion(
-            filename=safe_filename,
-            full_text=full_doc_text,
+        return self._ingestor.ingest(
+            filename=filename,
+            pdf_bytes=pdf_bytes,
+            tags=tags,
+            doc_id=doc_id,
         )
-        concept_ids = [c["concept_id"] for c in extracted_concepts]
-
-        chunk_records: List[Dict[str, Any]] = []
-        global_chunk_idx = 0
-
-        for page_num, extracted_text in page_texts:
-            for chunk_str in chunk_text(extracted_text):
-                global_chunk_idx += 1
-                chunk_id = f"{assigned_doc_id}_p{page_num}_c{global_chunk_idx}"
-                enriched_text = f"{safe_filename} (Page {page_num}): {chunk_str}"
-                chunk_records.append(
-                    {
-                        "chunk_id": chunk_id,
-                        "doc_id": assigned_doc_id,
-                        "filename": safe_filename,
-                        "title": safe_filename,
-                        "page_number": page_num,
-                        "chunk_index": global_chunk_idx,
-                        "content": chunk_str,
-                        "is_public": acl.is_public,
-                        "acl_tags": acl.acl_tags,
-                        "uploaded_at": uploaded_at,
-                        "embedding": self._cross_lingual.embed(enriched_text),
-                    }
-                )
-
-        self._store.index_chunks(chunk_records)
-
-        return {
-            "doc_id": assigned_doc_id,
-            "filename": safe_filename,
-            "page_count": total_pages,
-            "chunk_count": len(chunk_records),
-            "is_public": acl.is_public,
-            "tags": acl.visible_tags,
-            "acl_tags": acl.acl_tags,
-            "dynamic_concepts": concept_ids,
-            "concept_model": concept_model,
-            "uploaded_at": uploaded_at,
-        }
 
     def list_documents(self) -> List[Dict[str, Any]]:
-        """Return a deduplicated list of all indexed PDF documents and their RBAC tags."""
-        docs_by_id: Dict[str, Dict[str, Any]] = {}
-        for item in self._store.list_all_chunk_metadata():
-            d_id = item["doc_id"]
-            raw_acl = item.get("acl_tags", [PUBLIC_SENTINEL_TAG])
-            visible_tags = extract_visible_tags(raw_acl)
-            is_pub = bool(item.get("is_public", len(visible_tags) == 0))
-            if d_id not in docs_by_id:
-                docs_by_id[d_id] = {
-                    "doc_id": d_id,
-                    "filename": item.get("filename", d_id),
-                    "page_count": item.get("page_number", 1),
-                    "chunk_count": 1,
-                    "is_public": is_pub,
-                    "tags": visible_tags,
-                    "acl_tags": raw_acl,
-                    "uploaded_at": item.get("uploaded_at", ""),
-                }
-            else:
-                docs_by_id[d_id]["chunk_count"] += 1
-                docs_by_id[d_id]["page_count"] = max(
-                    docs_by_id[d_id]["page_count"],
-                    int(item.get("page_number", 1)),
-                )
-
-        return sorted(
-            docs_by_id.values(),
-            key=lambda d: d.get("uploaded_at", ""),
-            reverse=True,
-        )
+        return self._repository.list_documents()
 
     def list_available_tags(self) -> List[str]:
-        """Return all unique RBAC tags currently in use plus standard enterprise tags."""
         return collect_available_tags(self.list_documents())
 
     def update_document_tags(
@@ -216,9 +201,8 @@ class RBACKnowledgeBaseService:
         doc_id: str,
         tags: List[str] | str | None,
     ) -> Dict[str, Any]:
-        """Update a document's RBAC tags in-place with zero re-embedding."""
         acl = resolve_document_acl(tags)
-        self._store.update_document_acl(
+        self._repository.update_document_acl(
             doc_id=doc_id,
             acl_tags=acl.acl_tags,
             is_public=acl.is_public,
@@ -231,18 +215,13 @@ class RBACKnowledgeBaseService:
         }
 
     def delete_document(self, doc_id: str) -> Dict[str, Any]:
-        """Remove a document and all its indexed chunks."""
-        self._store.delete_document_chunks(doc_id)
-        self._pdf_extractor.delete_upload(doc_id)
-        return {"deleted": True, "doc_id": doc_id}
+        return self._repository.delete_document(doc_id)
 
     def seed_sample_pdfs(self) -> List[Dict[str, Any]]:
-        """Seed the 4 enterprise sample PDFs via the injected seeder."""
-        return self._demo_seeder(self)
+        return self._seeder.seed(self)
 
     def reindex_all_sample_pdfs(self) -> List[Dict[str, Any]]:
-        """Clear the chunk store and re-seed the 4 sample PDFs."""
-        self._store.reset_store()
+        self._index_manager.reset_index()
         return self.seed_sample_pdfs()
 
     def query_and_chat(
@@ -252,7 +231,6 @@ class RBACKnowledgeBaseService:
         top_k: int = 4,
         synthesis_mode: str = "fast",
     ) -> Dict[str, Any]:
-        """Execute Pre-Filtered Cross-Lingual Hybrid Search and synthesize a grounded answer."""
         cleaned_roles, effective_acl_tags = build_effective_acl_tags(user_roles)
         is_cjk_query = self._cross_lingual.is_cross_lingual(question)
 
@@ -260,9 +238,9 @@ class RBACKnowledgeBaseService:
             question=question,
             allow_llm_fallback=(synthesis_mode == "llm"),
         )
-        query_vector = self._cross_lingual.embed(expanded_query)
+        query_vector = self._embedder.embed(expanded_query)
 
-        search_outcome = self._store.hybrid_search(
+        search_outcome = self._retriever.search(
             expanded_query=expanded_query,
             query_vector=query_vector,
             effective_acl_tags=effective_acl_tags,

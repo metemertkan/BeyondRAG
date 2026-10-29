@@ -454,3 +454,10 @@ def embed_text(text: str) -> List[float]:
         return vec
 
     return [round(v / norm, 6) for v in vec]
+
+
+class CrossLingualEmbedder:
+    """Component 8: Vector Embedder implementing `EmbedderPort`."""
+
+    def embed(self, text: str) -> List[float]:
+        return embed_text(text)
