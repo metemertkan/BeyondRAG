@@ -69,8 +69,14 @@ BeyondRAG/
 ├── src/
 │   ├── config.py             # Environment & Dual-LLM router (Gemini + Ollama fallback)
 │   ├── rag/
-│   │   ├── embeddings.py     # Dynamic Ollama Ingestion-Time EN<->ZH Concept Extractor & Embedder
-│   │   └── service.py        # ES 8.15 RBAC Pre-Filtered & Cross-Lingual RAG Service
+│   │   ├── acl.py            # Pure Domain: RBAC tag normalization & ACL resolution
+│   │   ├── ports.py          # Pure Domain: Protocol interfaces (ChunkStore, CrossLingual, Synthesizer) & chunking
+│   │   ├── service.py        # Pure Domain: Orchestration service (zero ES/Gemini/Ollama/FastAPI imports)
+│   │   ├── retriever.py      # Adapter: Elasticsearch 8.15 Pre-Filtered Hybrid Search (BM25 + int8_hnsw)
+│   │   ├── cross_lingual.py  # Adapter: Cross-Lingual (EN <-> ZH) query preparation & LLM fallback
+│   │   ├── embeddings.py     # Adapter: Dynamic Ollama Ingestion-Time EN<->ZH Concept Extractor & Embedder
+│   │   ├── synthesizer.py    # Adapter: Grounded answer & RBAC block synthesis
+│   │   └── seeding.py        # Adapter: Demo PDF generation (ReportLab) & PyPDF extraction
 │   └── web/
 │       ├── app.py            # REST API endpoints (/api/upload, /api/documents, /api/chat)
 │       └── static/
