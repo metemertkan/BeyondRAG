@@ -1,0 +1,255 @@
+{
+  "documents": {
+    "d5c0e061852b4044": {
+      "filename": "HK_Enterprise_Public_Handbook_2026.pdf",
+      "model_used": "ollama/qwen3:8b",
+      "concepts": [
+        {
+          "concept_id": "concept:d5c0e0_1_work_schedule",
+          "en_triggers": [
+            "core hours",
+            "hybrid attendance",
+            "workplace policy"
+          ],
+          "zh_triggers": [
+            "核心工作時間",
+            "混合上班安排",
+            "工作場地政策"
+          ],
+          "en_expansion": "core hours hybrid attendance workplace policy core hours hybrid attendance workplace policy"
+        },
+        {
+          "concept_id": "concept:d5c0e0_2_weather_protocol",
+          "en_triggers": [
+            "severe weather",
+            "typhoon signal",
+            "black rainstorm"
+          ],
+          "zh_triggers": [
+            "天氣應對措施",
+            "颱風信號",
+            "黑色暴雨警告"
+          ],
+          "en_expansion": "severe weather typhoon signal black rainstorm severe weather typhoon signal black rainstorm"
+        },
+        {
+          "concept_id": "concept:d5c0e0_3_it_support",
+          "en_triggers": [
+            "it service desk",
+            "public wi-fi",
+            "guest access"
+          ],
+          "zh_triggers": [
+            "IT支援服務",
+            "公共無線網絡",
+            "訪客接入"
+          ],
+          "en_expansion": "IT Service Desk public Wi-Fi guest access it service desk public wi-fi guest access"
+        }
+      ]
+    },
+    "2165155419be3771": {
+      "filename": "HK_Treasury_FX_Liquidity_Policy_Q4.pdf",
+      "model_used": "ollama/qwen3:8b",
+      "concepts": [
+        {
+          "concept_id": "concept:216515_1_cash_reserve",
+          "en_triggers": [
+            "intraday",
+            "minimum",
+            "unencumbered",
+            "cash",
+            "reserve",
+            "hkd",
+            "450m"
+          ],
+          "zh_triggers": [
+            "現金儲備",
+            "最低現金儲備",
+            "未擔保現金",
+            "港幣4.5億"
+          ],
+          "en_expansion": "intraday minimum unencumbered cash reserve HKD 450M intraday minimum unencumbered cash reserve hkd 450m"
+        },
+        {
+          "concept_id": "concept:216515_2_fx_hedging",
+          "en_triggers": [
+            "fx",
+            "forward",
+            "contract",
+            "usd",
+            "10m",
+            "sign-off",
+            "cfo",
+            "head",
+            "treasury",
+            "unhedged",
+            "cny",
+            "exposure",
+            "capped",
+            "hkd",
+            "85m"
+          ],
+          "zh_triggers": [
+            "外匯對沖",
+            "遠期合約",
+            "美元1千萬",
+            "財務總監",
+            "財務部",
+            "未對沖人民幣",
+            "港幣8.5億"
+          ],
+          "en_expansion": "FX forward contract USD 10M, sign-off CFO, Head Treasury, unhedged CNY exposure capped HKD 85M fx forward contract usd 10m sign-off cfo head treasury unhedged cny exposure capped hkd 85m"
+        },
+        {
+          "concept_id": "concept:216515_3_nim_reporting",
+          "en_triggers": [
+            "net",
+            "interest",
+            "margin",
+            "nim",
+            "quarterly",
+            "covenant",
+            "reporting",
+            "audited",
+            "balance",
+            "sheet",
+            "compliance",
+            "certificate",
+            "5th",
+            "business",
+            "day"
+          ],
+          "zh_triggers": [
+            "淨息差",
+            "季度報告",
+            "信貸協議",
+            "審計資產負債表",
+            "合規證明",
+            "第五個工作日"
+          ],
+          "en_expansion": "Quarterly Net Interest Margin, Covenant Reporting, audited balance sheet, compliance certificate, 5th business day net interest margin nim quarterly covenant reporting audited balance sheet compliance certificate 5th business day"
+        }
+      ]
+    },
+    "271e05e482e2f105": {
+      "filename": "Global_Supply_Chain_Terminal_SOP.pdf",
+      "model_used": "ollama/qwen3:8b",
+      "concepts": [
+        {
+          "concept_id": "concept:271e05_1_dispatch_sla",
+          "en_triggers": [
+            "dispatch",
+            "sla",
+            "on-time",
+            "vessel",
+            "gate-out"
+          ],
+          "zh_triggers": [
+            "派車SLA",
+            "準時",
+            "貨櫃",
+            "出閘"
+          ],
+          "en_expansion": "dispatch SLA on-time vessel gate-out dispatch sla on-time vessel gate-out"
+        },
+        {
+          "concept_id": "concept:271e05_2_cold_chain",
+          "en_triggers": [
+            "cold-chain",
+            "reefer",
+            "iot",
+            "telemetry",
+            "excursion",
+            "alarm"
+          ],
+          "zh_triggers": [
+            "冷鏈",
+            "冷藏貨櫃",
+            "物聯網",
+            "監測",
+            "異常",
+            "警報"
+          ],
+          "en_expansion": "cold-chain reefer IoT telemetry excursion alarm cold-chain reefer iot telemetry excursion alarm"
+        },
+        {
+          "concept_id": "concept:271e05_3_cross_border",
+          "en_triggers": [
+            "cross-boundary",
+            "dual-plate",
+            "rocars",
+            "customs",
+            "clearance",
+            "border"
+          ],
+          "zh_triggers": [
+            "跨境",
+            "雙牌貨車",
+            "ROCARS",
+            "關務",
+            "清關",
+            "邊境"
+          ],
+          "en_expansion": "cross-boundary dual-plate ROCARS customs clearance border cross-boundary dual-plate rocars customs clearance border"
+        }
+      ]
+    },
+    "bb0b2b4a9b19e009": {
+      "filename": "Cross_Border_CapEx_Procurement_Matrix.pdf",
+      "model_used": "ollama/qwen3:8b",
+      "concepts": [
+        {
+          "concept_id": "concept:bb0b2b_1_capex_threshold",
+          "en_triggers": [
+            "capex",
+            "threshold",
+            "hk$500k",
+            "hk$2.5m"
+          ],
+          "zh_triggers": [
+            "資本支出門檻",
+            "HK$500",
+            "000",
+            "門檻",
+            "HK$2",
+            "500"
+          ],
+          "en_expansion": "capital expenditure thresholds, HKD 500,000, HKD 2,500,000 capex threshold hk$500k hk$2.5m"
+        },
+        {
+          "concept_id": "concept:bb0b2b_2_emergency_expedites",
+          "en_triggers": [
+            "emergency",
+            "expedite",
+            "fee",
+            "hk$350k"
+          ],
+          "zh_triggers": [
+            "緊急加急費用",
+            "HK$350",
+            "000",
+            "加急費用"
+          ],
+          "en_expansion": "emergency vendor expedite fee, HKD 350,000 emergency expedite fee hk$350k"
+        },
+        {
+          "concept_id": "concept:bb0b2b_3_rbac_access",
+          "en_triggers": [
+            "rbac",
+            "accessible",
+            "finance",
+            "operation"
+          ],
+          "zh_triggers": [
+            "RBAC",
+            "訪問權限",
+            "財務與運營權限"
+          ],
+          "en_expansion": "shared rbac, finance role, operation role, accessible rbac accessible finance operation"
+        }
+      ]
+    }
+  },
+  "query_cache": {}
+}

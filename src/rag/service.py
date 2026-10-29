@@ -21,6 +21,7 @@ from src.rag.embeddings import (
     STOPWORDS,
     embed_text,
     expand_cross_lingual_query,
+    extract_bilingual_concepts_at_ingestion,
     has_cjk,
 )
 
@@ -188,13 +189,29 @@ class RBACKnowledgeBaseService:
         total_pages = len(reader.pages)
         uploaded_at = _utc_now()
 
+        page_texts: List[tuple[int, str]] = []
+        for page_num, page in enumerate(reader.pages, start=1):
+            extracted_text = (page.extract_text() or "").strip()
+            if extracted_text:
+                page_texts.append((page_num, extracted_text))
+
+        if not page_texts:
+            raise ValueError(
+                f"No extractable text found in '{safe_filename}'. Ensure the PDF contains selectable text."
+            )
+
+        # Dynamically generate English <-> Chinese concept mappings at PDF upload time via local Ollama
+        full_doc_text = "\n\n".join(text for _, text in page_texts)
+        extracted_concepts, concept_model = extract_bilingual_concepts_at_ingestion(
+            filename=safe_filename,
+            full_text=full_doc_text,
+        )
+        concept_ids = [c["concept_id"] for c in extracted_concepts]
+
         chunk_records: List[Dict[str, Any]] = []
         global_chunk_idx = 0
 
-        for page_num, page in enumerate(reader.pages, start=1):
-            extracted_text = (page.extract_text() or "").strip()
-            if not extracted_text:
-                continue
+        for page_num, extracted_text in page_texts:
             page_chunks = _chunk_text(extracted_text)
             for chunk_str in page_chunks:
                 global_chunk_idx += 1
@@ -216,11 +233,6 @@ class RBACKnowledgeBaseService:
                 }
                 chunk_records.append(record)
 
-        if not chunk_records:
-            raise ValueError(
-                f"No extractable text found in '{safe_filename}'. Ensure the PDF contains selectable text."
-            )
-
         if self._is_es_online():
             self._ensure_index()
             for rec in chunk_records:
@@ -241,6 +253,8 @@ class RBACKnowledgeBaseService:
             "is_public": is_public,
             "tags": [] if is_public else normalized_tags,
             "acl_tags": acl_tags,
+            "dynamic_concepts": concept_ids,
+            "concept_model": concept_model,
             "uploaded_at": uploaded_at,
         }
 
