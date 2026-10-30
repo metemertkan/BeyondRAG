@@ -13,20 +13,25 @@ from elasticsearch import Elasticsearch
 
 from src.config import ELASTICSEARCH_URL
 from src.rag.embeddings import EMBEDDING_DIMS
+from src.rag.profiles import DEFAULT_INDEX_PREFIX, IndexTenantStrategy
 
-KB_INDEX_NAME: Final[str] = "hk-rbac-rag-kb"
+KB_INDEX_NAME: Final[str] = DEFAULT_INDEX_PREFIX
 
 
 class ElasticsearchIndexManager:
-    """Manages Elasticsearch 8.15 connection, health checks, and index schema lifecycle."""
+    """Manages Elasticsearch 8.15 connection, health checks, and configurable index/tenant schema lifecycle."""
 
     def __init__(
         self,
         es_url: str = ELASTICSEARCH_URL,
-        index_name: str = KB_INDEX_NAME,
+        index_name: str | None = None,
+        tenant_strategy: IndexTenantStrategy | None = None,
+        dimensions: int = EMBEDDING_DIMS,
     ) -> None:
         self._es_url = es_url
-        self.index_name = index_name
+        self.tenant_strategy = tenant_strategy or IndexTenantStrategy()
+        self.index_name = index_name or self.tenant_strategy.resolve_index_name()
+        self.dimensions = dimensions
         self.client = Elasticsearch(self._es_url, request_timeout=5, max_retries=1)
         self.memory_chunks: List[Dict[str, Any]] = []
         self.ensure_index()
@@ -67,7 +72,7 @@ class ElasticsearchIndexManager:
                         "uploaded_at": {"type": "keyword"},
                         "embedding": {
                             "type": "dense_vector",
-                            "dims": EMBEDDING_DIMS,
+                            "dims": self.dimensions,
                             "index": True,
                             "similarity": "cosine",
                             "index_options": {

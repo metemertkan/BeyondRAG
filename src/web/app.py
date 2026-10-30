@@ -49,6 +49,10 @@ class ChatRequest(BaseModel):
         default="fast",
         description="'fast' for instant citation synthesis or 'llm' for local Ollama/Gemini generation.",
     )
+    retrieval_profile: str = Field(
+        default="default",
+        description="Retrieval profile ('default', 'precision', 'high_recall', 'executive_summary').",
+    )
 
 
 class UpdateTagsRequest(BaseModel):
@@ -179,4 +183,5 @@ async def chat_with_kb(payload: ChatRequest) -> Dict[str, Any]:
         user_roles=payload.user_roles,
         top_k=payload.top_k,
         synthesis_mode=payload.synthesis_mode,
+        retrieval_profile=payload.retrieval_profile,
     )

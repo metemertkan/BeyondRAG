@@ -16,6 +16,7 @@ from src.rag.acl import resolve_document_acl
 from src.rag.ports import (
     ChunkerPort,
     CrossLingualPort,
+    DocumentParserPort,
     DocumentRepositoryPort,
     EmbedderPort,
     PdfTextExtractorPort,
@@ -27,11 +28,11 @@ def _utc_now() -> str:
 
 
 class PdfIngestor:
-    """Domain component that orchestrates ingesting a PDF document into the knowledge base."""
+    """Domain component that orchestrates ingesting a document into the knowledge base."""
 
     def __init__(
         self,
-        extractor: PdfTextExtractorPort,
+        extractor: DocumentParserPort | PdfTextExtractorPort,
         chunker: ChunkerPort,
         cross_lingual: CrossLingualPort,
         embedder: EmbedderPort,
@@ -57,7 +58,15 @@ class PdfIngestor:
         uploaded_at = _utc_now()
 
         self._repository.save_upload_file(assigned_doc_id, safe_filename, pdf_bytes)
-        total_pages, page_texts = self._extractor.extract_pages(pdf_bytes)
+        
+        # Support both DocumentParserPort (filename, bytes) and legacy PdfTextExtractorPort (bytes)
+        if hasattr(self._extractor, "extract_pages"):
+            try:
+                total_pages, page_texts = self._extractor.extract_pages(safe_filename, pdf_bytes)  # type: ignore
+            except TypeError:
+                total_pages, page_texts = self._extractor.extract_pages(pdf_bytes)  # type: ignore
+        else:
+            raise ValueError(f"No compatible extractor found for {safe_filename}")
 
         if not page_texts:
             raise ValueError(

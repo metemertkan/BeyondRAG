@@ -46,6 +46,13 @@ class PdfTextExtractorPort(Protocol):
         ...
 
 
+class DocumentParserPort(Protocol):
+    """Port 2b: Pluggable document parser supporting multiple formats."""
+
+    def extract_pages(self, filename: str, file_bytes: bytes) -> Tuple[int, List[Tuple[int, str]]]:
+        ...
+
+
 class ChunkerPort(Protocol):
     """Port 3: Text segmentation and chunking."""
 
@@ -129,7 +136,8 @@ class HybridRetrieverPort(Protocol):
         expanded_query: str,
         query_vector: List[float],
         effective_acl_tags: List[str],
-        top_k: int,
+        top_k: int = 4,
+        profile_name: str | None = None,
     ) -> HybridSearchOutcome:
         ...
 

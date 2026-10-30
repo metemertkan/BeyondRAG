@@ -55,11 +55,11 @@ def _wire_default_components(
 ]:
     """Composition root wiring the concrete infrastructure adapters."""
     from src.config import ELASTICSEARCH_URL
-    from src.rag.chunker import TextChunker
+    from src.rag.chunker import create_chunker
     from src.rag.cross_lingual import DefaultCrossLingualAdapter
     from src.rag.embeddings import CrossLingualEmbedder
     from src.rag.es_client import ElasticsearchIndexManager
-    from src.rag.extractor import PdfTextExtractor
+    from src.rag.extractor import DocumentParserRegistry
     from src.rag.ingestor import PdfIngestor
     from src.rag.repository import DocumentRepository
     from src.rag.retriever import HybridRetriever
@@ -70,8 +70,8 @@ def _wire_default_components(
         es_url=es_url or ELASTICSEARCH_URL,
         index_name=KB_INDEX_NAME,
     )
-    extractor = PdfTextExtractor()
-    chunker = TextChunker()
+    extractor = DocumentParserRegistry()
+    chunker = create_chunker()
     cross_lingual = DefaultCrossLingualAdapter()
     embedder = CrossLingualEmbedder()
     repository = DocumentRepository(es_manager=es_manager)
@@ -230,6 +230,7 @@ class RBACKnowledgeBaseService:
         user_roles: List[str] | str | None = None,
         top_k: int = 4,
         synthesis_mode: str = "fast",
+        retrieval_profile: str | None = None,
     ) -> Dict[str, Any]:
         cleaned_roles, effective_acl_tags = build_effective_acl_tags(user_roles)
         is_cjk_query = self._cross_lingual.is_cross_lingual(question)
@@ -245,6 +246,7 @@ class RBACKnowledgeBaseService:
             query_vector=query_vector,
             effective_acl_tags=effective_acl_tags,
             top_k=top_k,
+            profile_name=retrieval_profile,
         )
 
         answer = self._synthesizer.synthesize(

@@ -15,15 +15,18 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Final, List, Tuple
+from typing import Any, Dict, Final, List, Optional, Tuple
 
 import httpx
 
 from src.config import OLLAMA_BASE_URL, WORKSPACE_DIR, _detect_host_ollama_models
 
-EMBEDDING_DIMS: Final[int] = 256
+EMBEDDING_PROVIDER: Final[str] = os.getenv("RAG_EMBEDDING_PROVIDER", "feature_hash").strip().lower()
+EMBEDDING_MODEL_NAME: Final[str] = os.getenv("RAG_EMBEDDING_MODEL", "bge-m3").strip()
+EMBEDDING_DIMS: Final[int] = int(os.getenv("RAG_EMBEDDING_DIMS", "256"))
 _TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9_]+|[\u4e00-\uffff]+", re.IGNORECASE)
 _CJK_CHAR_RE: Final[re.Pattern[str]] = re.compile(r"[\u4e00-\uffff]")
 
@@ -433,16 +436,50 @@ def _extract_features(text: str) -> list[tuple[str, float]]:
     return features
 
 
-def embed_text(text: str) -> List[float]:
-    """Compute an L2-normalized 256-dimensional cross-lingual dense vector for Elasticsearch int8_hnsw."""
-    vec = [0.0] * EMBEDDING_DIMS
+def _embed_via_ollama(text: str, model_name: str = EMBEDDING_MODEL_NAME, dims: int = EMBEDDING_DIMS) -> Optional[List[float]]:
+    """Compute dense embeddings via Ollama /api/embed if configured."""
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(
+                f"{OLLAMA_BASE_URL.rstrip('/')}/api/embed",
+                json={"model": model_name, "input": text},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                embeddings = data.get("embeddings", [])
+                if embeddings and isinstance(embeddings[0], list):
+                    vec = embeddings[0]
+                    # Resize or pad if dimension mismatch
+                    if len(vec) > dims:
+                        vec = vec[:dims]
+                    elif len(vec) < dims:
+                        vec = vec + [0.0] * (dims - len(vec))
+                    norm = math.sqrt(sum(v * v for v in vec))
+                    return [round(v / (norm + 1e-9), 6) for v in vec]
+    except Exception:
+        pass
+    return None
+
+
+def embed_text(text: str, dims: int = EMBEDDING_DIMS) -> List[float]:
+    """Compute an L2-normalized dense vector for Elasticsearch int8_hnsw.
+    
+    Routes to Ollama embedding model when RAG_EMBEDDING_PROVIDER='ollama',
+    otherwise uses dynamic semantic feature hashing.
+    """
+    if EMBEDDING_PROVIDER == "ollama":
+        ollama_vec = _embed_via_ollama(text, dims=dims)
+        if ollama_vec:
+            return ollama_vec
+
+    vec = [0.0] * dims
     features = _extract_features(text)
 
     for feat, weight in features:
         digest = hashlib.sha256(feat.encode("utf-8")).digest()
-        idx1 = int.from_bytes(digest[0:2], "little") % EMBEDDING_DIMS
+        idx1 = int.from_bytes(digest[0:2], "little") % dims
         sign1 = 1.0 if (digest[2] & 1) == 0 else -1.0
-        idx2 = int.from_bytes(digest[4:6], "little") % EMBEDDING_DIMS
+        idx2 = int.from_bytes(digest[4:6], "little") % dims
         sign2 = 1.0 if (digest[6] & 1) == 0 else -1.0
 
         vec[idx1] += sign1 * weight
@@ -457,7 +494,17 @@ def embed_text(text: str) -> List[float]:
 
 
 class CrossLingualEmbedder:
-    """Component 8: Vector Embedder implementing `EmbedderPort`."""
+    """Component: Configurable Vector Embedder implementing `EmbedderPort`."""
+
+    def __init__(
+        self,
+        provider: str = EMBEDDING_PROVIDER,
+        dimensions: int = EMBEDDING_DIMS,
+        model_name: str = EMBEDDING_MODEL_NAME,
+    ) -> None:
+        self.provider = provider
+        self.dimensions = dimensions
+        self.model_name = model_name
 
     def embed(self, text: str) -> List[float]:
-        return embed_text(text)
+        return embed_text(text, dims=self.dimensions)

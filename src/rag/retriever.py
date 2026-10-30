@@ -13,6 +13,7 @@ from src.rag.acl import PUBLIC_SENTINEL_TAG, extract_visible_tags
 from src.rag.embeddings import STOPWORDS, has_cjk
 from src.rag.es_client import ElasticsearchIndexManager
 from src.rag.ports import HybridSearchOutcome
+from src.rag.profiles import RetrievalProfile, get_retrieval_profile
 
 
 class HybridRetriever:
@@ -26,25 +27,28 @@ class HybridRetriever:
         expanded_query: str,
         query_vector: List[float],
         effective_acl_tags: List[str],
-        top_k: int,
+        top_k: int = 4,
+        profile_name: str | None = None,
     ) -> HybridSearchOutcome:
+        profile: RetrievalProfile = get_retrieval_profile(profile_name, top_k_override=top_k)
+        effective_top_k = profile.top_k
         acl_filter_clause = {"terms": {"acl_tags": effective_acl_tags}}
         es_query_dsl = {
-            "size": top_k,
+            "size": effective_top_k,
             "query": {
                 "bool": {
                     "should": [
-                        {"match": {"content": {"query": expanded_query, "boost": 2.0}}},
-                        {"match": {"title": {"query": expanded_query, "boost": 1.2}}},
+                        {"match": {"content": {"query": expanded_query, "boost": profile.content_boost}}},
+                        {"match": {"title": {"query": expanded_query, "boost": profile.title_boost}}},
                     ],
                     "filter": [acl_filter_clause],
                 }
             },
             "knn": {
                 "field": "embedding",
-                "query_vector": "<256-dim Cross-Lingual EN<->ZH L2-normalized vector>",
-                "k": top_k,
-                "num_candidates": max(20, top_k * 4),
+                "query_vector": f"<{len(query_vector)}-dim Dense Vector>",
+                "k": effective_top_k,
+                "num_candidates": max(20, effective_top_k * profile.num_candidates_multiplier),
                 "filter": acl_filter_clause,
             },
         }
@@ -57,12 +61,12 @@ class HybridRetriever:
             self.es_manager.ensure_index()
             resp = self.es_manager.client.search(
                 index=self.es_manager.index_name,
-                size=top_k,
+                size=effective_top_k,
                 query={
                     "bool": {
                         "should": [
-                            {"match": {"content": {"query": expanded_query, "boost": 2.0}}},
-                            {"match": {"title": {"query": expanded_query, "boost": 1.2}}},
+                            {"match": {"content": {"query": expanded_query, "boost": profile.content_boost}}},
+                            {"match": {"title": {"query": expanded_query, "boost": profile.title_boost}}},
                         ],
                         "filter": [acl_filter_clause],
                     }
@@ -70,8 +74,8 @@ class HybridRetriever:
                 knn={
                     "field": "embedding",
                     "query_vector": query_vector,
-                    "k": top_k,
-                    "num_candidates": max(20, top_k * 4),
+                    "k": effective_top_k,
+                    "num_candidates": max(20, effective_top_k * profile.num_candidates_multiplier),
                     "filter": acl_filter_clause,
                 },
             )
