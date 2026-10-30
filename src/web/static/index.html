@@ -4,40 +4,86 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BeyondRAG | Enterprise RBAC &amp; Cross-Lingual RAG</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
       darkMode: 'class',
       theme: {
         extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
           colors: {
-            slate: { 850: '#151f32', 925: '#0b1120', 950: '#060a14' }
+            ctp: {
+              rosewater: '#f5e0dc',
+              flamingo: '#f2cdcd',
+              pink: '#f5c2e7',
+              mauve: '#cba6f7',
+              red: '#f38ba8',
+              maroon: '#eba0ac',
+              peach: '#fab387',
+              yellow: '#f9e2af',
+              green: '#a6e3a1',
+              teal: '#94e2d5',
+              sky: '#89dceb',
+              sapphire: '#74c7ec',
+              blue: '#89b4fa',
+              lavender: '#b4befe',
+              text: '#cdd6f4',
+              subtext1: '#bac2de',
+              subtext0: '#a6adc8',
+              overlay2: '#9399b2',
+              overlay1: '#7f849c',
+              overlay0: '#6c7086',
+              surface2: '#585b70',
+              surface1: '#45475a',
+              surface0: '#313244',
+              base: '#1e1e2e',
+              mantle: '#181825',
+              crust: '#11111b',
+            }
           }
         }
       }
     };
   </script>
   <style>
-    ::-webkit-scrollbar { width: 5px; height: 5px; }
-    ::-webkit-scrollbar-track { background: #060a14; }
-    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #11111b; }
+    ::-webkit-scrollbar-thumb { background: #45475a; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #585b70; }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-indigo-500 selection:text-white">
+<body class="bg-ctp-crust text-ctp-text min-h-screen flex flex-col font-sans antialiased selection:bg-ctp-mauve selection:text-ctp-crust">
 
-  <!-- Minimal Sleek Top Bar -->
-  <header class="border-b border-slate-800/80 bg-slate-925/95 backdrop-blur sticky top-0 z-30">
-    <div class="max-w-[1380px] mx-auto px-5 py-3 flex flex-wrap items-center justify-between gap-3">
+  <!-- Catppuccin Mocha Sleek Top Bar -->
+  <header class="border-b border-ctp-surface0 bg-ctp-mantle/95 backdrop-blur sticky top-0 z-30 shadow-md shadow-ctp-crust/50">
+    <div class="max-w-[1400px] mx-auto px-5 py-3 flex flex-wrap items-center justify-between gap-3">
       <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-500 flex items-center justify-center font-black text-white text-base shadow-lg shadow-indigo-500/20">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-ctp-mauve via-ctp-lavender to-ctp-blue flex items-center justify-center font-black text-ctp-crust text-base shadow-lg shadow-ctp-mauve/25">
           BR
         </div>
-        <h1 class="text-lg font-extrabold tracking-tight text-white">BeyondRAG</h1>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-lg font-extrabold tracking-tight text-ctp-text">BeyondRAG</h1>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-ctp-mauve/15 text-ctp-mauve border border-ctp-mauve/30">
+              Catppuccin Mocha
+            </span>
+          </div>
+          <p class="text-xs text-ctp-subtext0">Enterprise RBAC &amp; Cross-Lingual Knowledge Base</p>
+        </div>
       </div>
 
       <!-- Active Role Switcher -->
-      <div class="flex flex-wrap items-center gap-2 bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2">
-        <span class="text-xs font-bold uppercase tracking-wider text-slate-400 mr-1">Role:</span>
+      <div class="flex flex-wrap items-center gap-2 bg-ctp-base border border-ctp-surface0 rounded-xl px-3.5 py-1.5 shadow-inner">
+        <span class="text-xs font-bold uppercase tracking-wider text-ctp-subtext0 mr-1 flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-ctp-lavender animate-pulse"></span>
+          Role:
+        </span>
         <button onclick="setRolePreset([])" id="presetPublicBtn" class="px-3.5 py-1.5 rounded-lg text-sm font-bold transition border">
           Public Only
         </button>
@@ -55,85 +101,90 @@
   </header>
 
   <!-- Main 2-Section Layout: (1) PDF Upload & Knowledge Base + (2) Multi-Lingual Chat -->
-  <main class="max-w-[1380px] w-full mx-auto px-5 py-5 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5">
+  <main class="max-w-[1400px] w-full mx-auto px-5 py-5 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5">
 
     <!-- SECTION 1: PDF UPLOAD & KNOWLEDGE BASE LIST (5 cols) -->
-    <section class="lg:col-span-5 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col gap-4">
+    <section class="lg:col-span-5 bg-ctp-mantle/90 border border-ctp-surface0 rounded-2xl p-5 shadow-xl flex flex-col gap-4">
       <div class="flex items-center justify-between">
-        <h2 class="text-base font-extrabold text-white uppercase tracking-wider flex items-center gap-2">
-          <span class="w-3 h-3 rounded-full bg-indigo-400"></span>
+        <h2 class="text-base font-extrabold text-ctp-text uppercase tracking-wider flex items-center gap-2.5">
+          <span class="w-3 h-3 rounded-full bg-ctp-lavender shadow-sm shadow-ctp-lavender/50"></span>
           1. PDF Upload &amp; Knowledge Base
         </h2>
-        <span id="uploadAccessPreview" class="px-3 py-1 rounded-full text-xs font-bold"></span>
+        <span id="uploadAccessPreview" class="px-3 py-1 rounded-full text-xs font-bold font-mono"></span>
       </div>
 
       <!-- Compact Upload & Tag Bar -->
-      <div class="bg-slate-950/90 border border-slate-800 rounded-xl p-4 space-y-3.5">
+      <div class="bg-ctp-base border border-ctp-surface0 rounded-xl p-4 space-y-3.5 shadow-sm">
         <div id="dropZone"
              onclick="document.getElementById('pdfFileInput').click()"
-             class="border border-dashed border-slate-700 hover:border-indigo-500 rounded-lg px-3.5 py-3 text-center cursor-pointer transition bg-slate-900/60 flex items-center justify-between gap-2">
+             class="border border-dashed border-ctp-surface1 hover:border-ctp-lavender rounded-lg px-3.5 py-3 text-center cursor-pointer transition bg-ctp-mantle/60 flex items-center justify-between gap-2 group">
           <input type="file" id="pdfFileInput" accept=".pdf,application/pdf" class="hidden" onchange="handleFileSelect(event)" />
-          <span id="selectedFileLabel" class="text-sm font-semibold text-slate-200 truncate">
+          <span id="selectedFileLabel" class="text-sm font-semibold text-ctp-text truncate group-hover:text-ctp-lavender transition">
             📄 Select PDF to Upload
           </span>
-          <span class="px-2.5 py-1 rounded bg-slate-800 text-xs font-bold text-slate-300 shrink-0">Browse</span>
+          <span class="px-2.5 py-1 rounded bg-ctp-surface0 text-xs font-bold text-ctp-subtext1 group-hover:bg-ctp-lavender group-hover:text-ctp-crust transition shrink-0">Browse</span>
         </div>
 
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-xs font-bold text-slate-400">Tag:</span>
+            <span class="text-xs font-bold text-ctp-subtext0">RBAC Tag:</span>
             <div id="uploadTagPills" class="flex flex-wrap gap-2"></div>
           </div>
 
           <button id="uploadSubmitBtn"
                   onclick="submitPdfUpload()"
-                  class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-extrabold text-white shadow transition">
+                  class="px-4 py-2 rounded-lg bg-ctp-lavender hover:bg-ctp-blue text-sm font-black text-ctp-crust shadow-md shadow-ctp-lavender/20 transition active:scale-95">
             Upload PDF
           </button>
         </div>
-        <div id="uploadStatusMsg" class="text-xs font-semibold text-slate-300 empty:hidden"></div>
+        <div id="uploadStatusMsg" class="text-xs font-semibold text-ctp-subtext1 empty:hidden"></div>
       </div>
 
       <!-- Knowledge Base Uploaded PDFs List -->
       <div class="flex-1 flex flex-col min-h-0">
         <div class="flex items-center justify-between mb-2.5">
-          <span class="text-xs font-extrabold uppercase tracking-wider text-slate-400">
+          <span class="text-xs font-extrabold uppercase tracking-wider text-ctp-subtext0">
             Knowledge Base PDFs
           </span>
-          <span id="chatRoleBanner" class="text-xs font-bold text-cyan-400"></span>
+          <span id="chatRoleBanner" class="text-xs font-bold font-mono text-ctp-sapphire"></span>
         </div>
         <div id="documentsList" class="space-y-2.5 overflow-y-auto pr-1"></div>
       </div>
     </section>
 
     <!-- SECTION 2: MULTI-LINGUAL RBAC CHAT (7 cols) -->
-    <section class="lg:col-span-7 bg-slate-900/80 border border-slate-800 rounded-2xl shadow-xl flex flex-col overflow-hidden min-h-[640px]">
+    <section class="lg:col-span-7 bg-ctp-mantle/90 border border-ctp-surface0 rounded-2xl shadow-xl flex flex-col overflow-hidden min-h-[640px]">
 
       <!-- Pre-Generated Multi-Lingual Query Chips -->
-      <div class="p-4 border-b border-slate-800 bg-slate-925/70 space-y-3">
+      <div class="p-4 border-b border-ctp-surface0 bg-ctp-base/70 space-y-3">
         <div class="flex items-center justify-between">
-          <h2 class="text-base font-extrabold text-white uppercase tracking-wider flex items-center gap-2">
-            <span class="w-3 h-3 rounded-full bg-cyan-400"></span>
+          <h2 class="text-base font-extrabold text-ctp-text uppercase tracking-wider flex items-center gap-2.5">
+            <span class="w-3 h-3 rounded-full bg-ctp-sapphire shadow-sm shadow-ctp-sapphire/50"></span>
             2. Multi-Lingual RBAC Chat
           </h2>
-          <select id="synthesisModeSelect" class="hidden">
-            <option value="fast">Instant</option>
+          <select id="synthesisModeSelect" class="bg-ctp-mantle border border-ctp-surface0 text-ctp-subtext0 text-xs rounded-lg px-2.5 py-1 font-mono focus:border-ctp-lavender">
+            <option value="fast">Instant Citation</option>
+            <option value="llm">Grounded LLM (Ollama)</option>
           </select>
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
-          <span class="text-xs font-extrabold text-cyan-400 mr-1">中文 → EN PDF:</span>
+          <span class="text-xs font-extrabold text-ctp-sapphire mr-1">Demo Prompts:</span>
           <button onclick="runQuickPrompt('八號風球及混合辦公考勤政策是什麼？')"
-                  class="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-sm font-bold text-emerald-300 transition">
-            [Public 公開] 八號風球政策
+                  class="px-3 py-1.5 rounded-lg bg-ctp-green/15 hover:bg-ctp-green/25 border border-ctp-green/30 text-xs font-bold text-ctp-green transition active:scale-95">
+            [Public 公開] 八號風球考勤
           </button>
           <button onclick="runQuickPrompt('最低港元現金儲備緩衝是多少？外匯遠期合約限額是多少？')"
-                  class="px-3 py-1.5 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/35 text-sm font-bold text-indigo-300 transition">
-            [Finance 財務標籤] 最低港元現金儲備
+                  class="px-3 py-1.5 rounded-lg bg-ctp-mauve/15 hover:bg-ctp-mauve/25 border border-ctp-mauve/30 text-xs font-bold text-ctp-mauve transition active:scale-95">
+            [Finance 財務] 最低港元現金儲備
           </button>
           <button onclick="runQuickPrompt('葵青貨櫃碼頭的準時調度SLA和冷鏈溫度是多少？')"
-                  class="px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-sm font-bold text-amber-300 transition">
-            [Operation 營運標籤] 葵青貨櫃碼頭SLA
+                  class="px-3 py-1.5 rounded-lg bg-ctp-peach/15 hover:bg-ctp-peach/25 border border-ctp-peach/30 text-xs font-bold text-ctp-peach transition active:scale-95">
+            [Operation 營運] 葵青碼頭SLA
+          </button>
+          <button onclick="runQuickPrompt('召回的 Nutrilon Duobalans 1 批號和保質期是多少？')"
+                  class="px-3 py-1.5 rounded-lg bg-ctp-teal/15 hover:bg-ctp-teal/25 border border-ctp-teal/30 text-xs font-bold text-ctp-teal transition active:scale-95">
+            [Recall 召回] Nutrilon 批號保質期
           </button>
         </div>
       </div>
@@ -142,14 +193,14 @@
       <div id="chatMessages" class="flex-1 p-5 space-y-3.5 overflow-y-auto"></div>
 
       <!-- Chat Input -->
-      <form onsubmit="handleChatSubmit(event)" class="p-4 border-t border-slate-800 bg-slate-925/80 flex gap-2.5">
+      <form onsubmit="handleChatSubmit(event)" class="p-4 border-t border-ctp-surface0 bg-ctp-base/80 flex gap-2.5">
         <input id="chatInput"
                type="text"
-               placeholder="Click a query above or ask in Chinese / English..."
-               class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm font-medium text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
+               placeholder="Click a query above or ask in Chinese / English / Dutch..."
+               class="flex-1 bg-ctp-crust border border-ctp-surface0 rounded-xl px-4 py-2.5 text-sm font-medium text-ctp-text placeholder-ctp-overlay0 focus:outline-none focus:border-ctp-lavender transition" />
         <button id="chatSendBtn"
                 type="submit"
-                class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-sm font-extrabold text-white shadow transition">
+                class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-ctp-mauve via-ctp-lavender to-ctp-blue hover:opacity-90 text-sm font-black text-ctp-crust shadow-lg shadow-ctp-mauve/20 transition active:scale-95">
           Ask KB
         </button>
       </form>
@@ -175,7 +226,7 @@
       if (files && files.length > 0) {
         selectedPdfFile = files[0];
         document.getElementById('selectedFileLabel').innerHTML =
-          `📄 <span class="text-emerald-400 font-extrabold">${escapeHtml(selectedPdfFile.name)}</span>`;
+          `📄 <span class="text-ctp-green font-extrabold">${escapeHtml(selectedPdfFile.name)}</span>`;
       }
     }
 
@@ -190,13 +241,14 @@
       const container = document.getElementById('uploadTagPills');
       container.innerHTML = availableTags.map(tag => {
         const active = selectedUploadTags.has(tag);
-        const cls = active
-          ? 'bg-indigo-600 text-white border-indigo-400 shadow-sm'
-          : 'bg-slate-900 text-slate-300 border-slate-700 hover:text-white';
+        const activeClass = tag === 'finance'
+          ? 'bg-ctp-mauve text-ctp-crust border-ctp-mauve shadow-sm'
+          : 'bg-ctp-peach text-ctp-crust border-ctp-peach shadow-sm';
+        const inactiveClass = 'bg-ctp-base text-ctp-subtext0 border-ctp-surface0 hover:border-ctp-surface1 hover:text-ctp-text';
         return `
           <button type="button"
                   onclick="toggleUploadTag('${escapeHtml(tag)}')"
-                  class="px-3 py-1.5 rounded-lg text-sm font-bold border transition flex items-center gap-1.5 ${cls}">
+                  class="px-3 py-1.5 rounded-lg text-sm font-bold border transition flex items-center gap-1.5 ${active ? activeClass : inactiveClass}">
             <span>${active ? '✓' : '+'}</span>
             <span>${escapeHtml(tag)}</span>
           </button>
@@ -208,10 +260,10 @@
       const badge = document.getElementById('uploadAccessPreview');
       const tags = Array.from(selectedUploadTags);
       if (tags.length === 0) {
-        badge.className = 'px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
+        badge.className = 'px-3 py-1 rounded-full text-xs font-bold font-mono bg-ctp-green/15 text-ctp-green border border-ctp-green/30';
         badge.textContent = 'PUBLIC';
       } else {
-        badge.className = 'px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40';
+        badge.className = 'px-3 py-1 rounded-full text-xs font-bold font-mono bg-ctp-mauve/20 text-ctp-mauve border border-ctp-mauve/40';
         badge.textContent = `Tag: ${tags.join(', ')}`;
       }
     }
@@ -232,8 +284,8 @@
       const setBtnStyle = (id, active) => {
         const el = document.getElementById(id);
         el.className = active
-          ? 'px-3.5 py-1.5 rounded-lg text-sm font-extrabold transition border bg-cyan-500/25 border-cyan-400 text-cyan-200 shadow-sm'
-          : 'px-3.5 py-1.5 rounded-lg text-sm font-semibold transition border bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200';
+          ? 'px-3.5 py-1.5 rounded-lg text-sm font-extrabold transition border bg-ctp-lavender/25 border-ctp-lavender text-ctp-lavender shadow-sm'
+          : 'px-3.5 py-1.5 rounded-lg text-sm font-semibold transition border bg-ctp-base border-ctp-surface0 text-ctp-subtext0 hover:text-ctp-text hover:border-ctp-surface1';
       };
       setBtnStyle('presetPublicBtn', isPublicOnly);
       setBtnStyle('presetFinanceBtn', isFinOnly);
@@ -242,8 +294,8 @@
 
       const banner = document.getElementById('chatRoleBanner');
       banner.textContent = roles.length === 0
-        ? 'Role: Public Only'
-        : `Role: ${roles.join(' + ')}`;
+        ? 'Active: Public Only'
+        : `Active: ${roles.join(' + ')}`;
     }
 
     async function fetchDocumentsAndTags() {
@@ -261,7 +313,7 @@
       if (!selectedPdfFile) return;
 
       btn.disabled = true;
-      statusEl.innerHTML = `<span class="text-cyan-400">Indexing...</span>`;
+      statusEl.innerHTML = `<span class="text-ctp-sapphire animate-pulse">⏳ Indexing & extracting concepts...</span>`;
       try {
         const formData = new FormData();
         formData.append('file', selectedPdfFile);
@@ -269,12 +321,12 @@
         const resp = await fetch('/api/upload', { method: 'POST', body: formData });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.detail || 'Upload failed');
-        statusEl.innerHTML = `<span class="text-emerald-400">✓ Added ${escapeHtml(data.document.filename)}</span>`;
+        statusEl.innerHTML = `<span class="text-ctp-green font-bold">✓ Added ${escapeHtml(data.document.filename)}</span>`;
         selectedPdfFile = null;
         document.getElementById('pdfFileInput').value = '';
         await fetchDocumentsAndTags();
       } catch (err) {
-        statusEl.innerHTML = `<span class="text-rose-400">${escapeHtml(err.message)}</span>`;
+        statusEl.innerHTML = `<span class="text-ctp-red font-bold">${escapeHtml(err.message)}</span>`;
       } finally {
         btn.disabled = false;
       }
@@ -290,17 +342,22 @@
       container.innerHTML = documents.map(doc => {
         const accessible = canCurrentUserAccessDoc(doc);
         const statusPill = accessible
-          ? `<span class="px-2.5 py-1 rounded-lg text-xs font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/35 shrink-0">✓ Unlocked</span>`
-          : `<span class="px-2.5 py-1 rounded-lg text-xs font-extrabold bg-rose-500/20 text-rose-300 border border-rose-500/35 shrink-0">🔒 Locked</span>`;
+          ? `<span class="px-2.5 py-1 rounded-lg text-xs font-extrabold font-mono bg-ctp-green/20 text-ctp-green border border-ctp-green/35 shrink-0">✓ Unlocked</span>`
+          : `<span class="px-2.5 py-1 rounded-lg text-xs font-extrabold font-mono bg-ctp-red/20 text-ctp-red border border-ctp-red/35 shrink-0">🔒 Locked</span>`;
 
         const tagPills = (doc.is_public || !doc.tags || doc.tags.length === 0)
-          ? `<span class="px-2 py-0.5 rounded text-xs font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">PUBLIC</span>`
-          : doc.tags.map(t => `<span class="px-2 py-0.5 rounded text-xs font-mono font-bold bg-indigo-500/25 text-indigo-300 border border-indigo-500/35">${escapeHtml(t)}</span>`).join(' ');
+          ? `<span class="px-2 py-0.5 rounded text-xs font-mono font-bold bg-ctp-green/15 text-ctp-green border border-ctp-green/25">PUBLIC</span>`
+          : doc.tags.map(t => {
+              const colorClass = t === 'finance'
+                ? 'bg-ctp-mauve/20 text-ctp-mauve border-ctp-mauve/35'
+                : 'bg-ctp-peach/20 text-ctp-peach border-ctp-peach/35';
+              return `<span class="px-2 py-0.5 rounded text-xs font-mono font-bold border ${colorClass}">${escapeHtml(t)}</span>`;
+            }).join(' ');
 
         return `
-          <div class="px-4 py-3 rounded-xl border transition flex items-center justify-between gap-3 ${accessible ? 'bg-slate-950/95 border-slate-800' : 'bg-slate-950/45 border-slate-900 opacity-65'}">
+          <div class="px-4 py-3 rounded-xl border transition flex items-center justify-between gap-3 ${accessible ? 'bg-ctp-base border-ctp-surface0 hover:border-ctp-surface1' : 'bg-ctp-mantle/60 border-ctp-surface0/60 opacity-60'}">
             <div class="min-w-0 flex-1">
-              <div class="text-sm font-extrabold text-white truncate">${escapeHtml(doc.filename)}</div>
+              <div class="text-sm font-extrabold text-ctp-text truncate">${escapeHtml(doc.filename)}</div>
               <div class="flex items-center gap-2 mt-1">
                 ${tagPills}
               </div>
@@ -329,12 +386,12 @@
       const sendBtn = document.getElementById('chatSendBtn');
 
       const roleBadge = roles.length
-        ? roles.map(r => `<span class="px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200 text-xs font-mono font-bold">${escapeHtml(r)}</span>`).join(' ')
-        : `<span class="px-2 py-0.5 rounded bg-emerald-500/25 text-emerald-200 text-xs font-mono font-bold">public</span>`;
+        ? roles.map(r => `<span class="px-2 py-0.5 rounded bg-ctp-mauve/30 text-ctp-mauve text-xs font-mono font-bold">${escapeHtml(r)}</span>`).join(' ')
+        : `<span class="px-2 py-0.5 rounded bg-ctp-green/25 text-ctp-green text-xs font-mono font-bold">public</span>`;
 
       messagesContainer.insertAdjacentHTML('beforeend', `
         <div class="flex justify-end">
-          <div class="max-w-[90%] bg-indigo-600/25 border border-indigo-500/40 rounded-2xl px-4 py-2.5 text-sm text-white flex items-center gap-2">
+          <div class="max-w-[90%] bg-ctp-blue/20 border border-ctp-blue/40 rounded-2xl px-4 py-2.5 text-sm text-ctp-text flex items-center gap-2 shadow-sm">
             ${roleBadge}
             <span class="font-bold">${escapeHtml(question)}</span>
           </div>
@@ -362,11 +419,20 @@
     function appendAssistantResponse(data) {
       const messagesContainer = document.getElementById('chatMessages');
       const isBlocked = (data.answer || '').includes('🔒');
-      const cardBorder = isBlocked ? 'border-rose-500/50 bg-rose-950/25' : 'border-emerald-500/45 bg-slate-950/95';
+      const cardBorder = isBlocked ? 'border-2 border-ctp-red/60 bg-ctp-red/10' : 'border-2 border-ctp-green/45 bg-ctp-base';
+
+      let metaInfo = '';
+      if (data.is_cross_lingual) {
+        metaInfo += `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-ctp-teal/20 text-ctp-teal border border-ctp-teal/35">🌐 Cross-Lingual (ZH→Doc)</span> `;
+      }
+      if (data.latency_ms) {
+        metaInfo += `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-ctp-surface0 text-ctp-subtext0">${data.latency_ms} ms</span>`;
+      }
 
       messagesContainer.insertAdjacentHTML('beforeend', `
-        <div class="border-2 rounded-2xl p-4 space-y-2 ${cardBorder}">
-          <div class="text-sm text-slate-100 leading-relaxed font-medium">
+        <div class="rounded-2xl p-4 space-y-2 shadow-md ${cardBorder}">
+          ${metaInfo ? `<div class="flex items-center gap-2">${metaInfo}</div>` : ''}
+          <div class="text-sm text-ctp-text leading-relaxed font-medium">
             ${formatSimpleMarkdown(data.answer || '')}
           </div>
         </div>
@@ -375,9 +441,9 @@
 
     function formatSimpleMarkdown(text) {
       return escapeHtml(text)
-        .replace(/\*\*(.+?)\*\*/g, '<strong class="text-white font-extrabold">$1</strong>')
-        .replace(/\*(.+?)\*/g, '<em class="text-slate-300">$1</em>')
-        .replace(/`([^`]+)`/g, '<code class="px-2 py-0.5 rounded bg-slate-800 text-cyan-300 font-mono text-xs font-bold">$1</code>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong class="text-ctp-lavender font-extrabold">$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em class="text-ctp-subtext1">$1</em>')
+        .replace(/`([^`]+)`/g, '<code class="px-2 py-0.5 rounded bg-ctp-surface0 text-ctp-teal font-mono text-xs font-bold border border-ctp-surface1">$1</code>')
         .replace(/\n/g, '<br/>');
     }
 
