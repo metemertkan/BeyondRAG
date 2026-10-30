@@ -29,8 +29,9 @@ class HybridRetriever:
         effective_acl_tags: List[str],
         top_k: int = 4,
         profile_name: str | None = None,
+        resolved_config: RetrievalProfile | None = None,
     ) -> HybridSearchOutcome:
-        profile: RetrievalProfile = get_retrieval_profile(profile_name, top_k_override=top_k)
+        profile: RetrievalProfile = resolved_config or get_retrieval_profile(profile_name, top_k_override=top_k)
         effective_top_k = profile.top_k
         acl_filter_clause = {"terms": {"acl_tags": effective_acl_tags}}
         es_query_dsl = {
@@ -38,8 +39,23 @@ class HybridRetriever:
             "query": {
                 "bool": {
                     "should": [
-                        {"match": {"content": {"query": expanded_query, "boost": profile.content_boost}}},
-                        {"match": {"title": {"query": expanded_query, "boost": profile.title_boost}}},
+                        {
+                            "match": {
+                                "content": {
+                                    "query": expanded_query,
+                                    "boost": profile.content_boost,
+                                    "minimum_should_match": profile.min_should_match,
+                                }
+                            }
+                        },
+                        {
+                            "match": {
+                                "title": {
+                                    "query": expanded_query,
+                                    "boost": profile.title_boost,
+                                }
+                            }
+                        },
                     ],
                     "filter": [acl_filter_clause],
                 }
@@ -65,8 +81,23 @@ class HybridRetriever:
                 query={
                     "bool": {
                         "should": [
-                            {"match": {"content": {"query": expanded_query, "boost": profile.content_boost}}},
-                            {"match": {"title": {"query": expanded_query, "boost": profile.title_boost}}},
+                            {
+                                "match": {
+                                    "content": {
+                                        "query": expanded_query,
+                                        "boost": profile.content_boost,
+                                        "minimum_should_match": profile.min_should_match,
+                                    }
+                                }
+                            },
+                            {
+                                "match": {
+                                    "title": {
+                                        "query": expanded_query,
+                                        "boost": profile.title_boost,
+                                    }
+                                }
+                            },
                         ],
                         "filter": [acl_filter_clause],
                     }
@@ -107,7 +138,7 @@ class HybridRetriever:
             )
             unfiltered_resp = self.es_manager.client.search(
                 index=self.es_manager.index_name,
-                size=10,
+                size=profile.audit_masked_size,
                 _source=["doc_id", "filename", "page_number", "acl_tags", "is_public"],
                 query={
                     "bool": {
@@ -116,7 +147,7 @@ class HybridRetriever:
                                 "match": {
                                     "content": {
                                         "query": domain_keywords or expanded_query,
-                                        "minimum_should_match": "2<60%",
+                                        "minimum_should_match": profile.min_should_match,
                                     }
                                 }
                             }

@@ -249,7 +249,51 @@
           "en_expansion": "shared rbac, finance role, operation role, accessible rbac accessible finance operation"
         }
       ]
+    },
+    "0ed1ea9c054d17e8": {
+      "filename": "Treasury_Doc.txt",
+      "model_used": "ollama/qwen3:8b",
+      "concepts": [
+        {
+          "concept_id": "concept:0ed1ea_1",
+          "en_triggers": [
+            "treasury",
+            "liquidity"
+          ],
+          "zh_triggers": [
+            "財務部",
+            "流動性"
+          ],
+          "en_expansion": "treasury liquidity management"
+        },
+        {
+          "concept_id": "concept:0ed1ea_2",
+          "en_triggers": [
+            "foreign exchange",
+            "foreign exchange contracts"
+          ],
+          "zh_triggers": [
+            "外匯",
+            "外匯合約"
+          ],
+          "en_expansion": "foreign exchange contracts approval"
+        },
+        {
+          "concept_id": "concept:0ed1ea_3",
+          "en_triggers": [
+            "cfo approves",
+            "cfo approval"
+          ],
+          "zh_triggers": [
+            "財務長批准",
+            "財務長核准"
+          ],
+          "en_expansion": "CFO approval process"
+        }
+      ]
     }
   },
-  "query_cache": {}
+  "query_cache": {
+    "八號風球考勤": "8号风球 attendance"
+  }
 }

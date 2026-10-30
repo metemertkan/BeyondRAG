@@ -1,8 +1,8 @@
-"""Retrieval Profiles and Index / Tenant Strategies for BeyondRAG.
+"""Component 8: Strongly Typed Retrieval Profiles and Parameter Resolution.
 
 Supports configurable multi-tenant or shared Elasticsearch indices, and use-case-specific
-retrieval profiles (e.g., precision, high-recall, executive summary) overriding top_k,
-candidate multipliers, and BM25 boost parameters.
+retrieval profiles (e.g., precision, high-recall, executive_summary) overriding top_k,
+candidate multipliers, minimum_should_match, and BM25 boost parameters.
 """
 
 from __future__ import annotations
@@ -44,6 +44,24 @@ class RetrievalProfile:
     min_should_match: str
     audit_masked_size: int
     default_synthesis_mode: str
+
+
+@dataclass(frozen=True)
+class ResolvedRetrievalConfig:
+    """Final, strongly typed retrieval parameters resolved exactly once per query."""
+
+    profile_name: str
+    top_k: int
+    num_candidates_multiplier: int
+    content_boost: float
+    title_boost: float
+    min_should_match: str
+    audit_masked_size: int
+    synthesis_mode: str
+
+    @property
+    def num_candidates(self) -> int:
+        return max(20, self.top_k * self.num_candidates_multiplier)
 
 
 RETRIEVAL_PROFILES: Final[Dict[str, RetrievalProfile]] = {
@@ -90,22 +108,47 @@ RETRIEVAL_PROFILES: Final[Dict[str, RetrievalProfile]] = {
 }
 
 
+def resolve_retrieval_config(
+    profile_name: Optional[str] = None,
+    top_k_override: Optional[int] = None,
+    synthesis_mode_override: Optional[str] = None,
+) -> ResolvedRetrievalConfig:
+    """Resolve retrieval configuration exactly once with clean precedence rules."""
+    name_key = (profile_name or "default").strip().lower()
+    if name_key not in RETRIEVAL_PROFILES:
+        raise ValueError(
+            f"Unknown retrieval profile '{profile_name}'. Valid profiles: {list(RETRIEVAL_PROFILES.keys())}"
+        )
+
+    base = RETRIEVAL_PROFILES[name_key]
+    effective_top_k = top_k_override if (top_k_override is not None and top_k_override > 0) else base.top_k
+    effective_synth = synthesis_mode_override if synthesis_mode_override else base.default_synthesis_mode
+
+    return ResolvedRetrievalConfig(
+        profile_name=base.name,
+        top_k=effective_top_k,
+        num_candidates_multiplier=base.num_candidates_multiplier,
+        content_boost=base.content_boost,
+        title_boost=base.title_boost,
+        min_should_match=base.min_should_match,
+        audit_masked_size=base.audit_masked_size,
+        synthesis_mode=effective_synth,
+    )
+
+
+# Backward-compatible helper
 def get_retrieval_profile(
     name: Optional[str] = None,
     top_k_override: Optional[int] = None,
 ) -> RetrievalProfile:
-    """Return the specified retrieval profile, falling back to 'default'."""
-    profile_key = (name or "default").strip().lower()
-    base = RETRIEVAL_PROFILES.get(profile_key, RETRIEVAL_PROFILES["default"])
-    if top_k_override is not None and top_k_override > 0:
-        return RetrievalProfile(
-            name=f"{base.name}-custom-topk",
-            top_k=top_k_override,
-            num_candidates_multiplier=base.num_candidates_multiplier,
-            content_boost=base.content_boost,
-            title_boost=base.title_boost,
-            min_should_match=base.min_should_match,
-            audit_masked_size=base.audit_masked_size,
-            default_synthesis_mode=base.default_synthesis_mode,
-        )
-    return base
+    resolved = resolve_retrieval_config(profile_name=name, top_k_override=top_k_override)
+    return RetrievalProfile(
+        name=resolved.profile_name,
+        top_k=resolved.top_k,
+        num_candidates_multiplier=resolved.num_candidates_multiplier,
+        content_boost=resolved.content_boost,
+        title_boost=resolved.title_boost,
+        min_should_match=resolved.min_should_match,
+        audit_masked_size=resolved.audit_masked_size,
+        default_synthesis_mode=resolved.synthesis_mode,
+    )
