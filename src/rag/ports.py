@@ -76,6 +76,9 @@ class DocumentRepositoryPort(Protocol):
     def delete_upload_file(self, doc_id: str) -> None:
         ...
 
+    def delete_chunks(self, doc_id: str) -> None:
+        ...
+
     def save_chunks(self, chunks: Sequence[Dict[str, Any]]) -> None:
         ...
 

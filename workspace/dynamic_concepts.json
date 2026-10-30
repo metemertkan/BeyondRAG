@@ -291,6 +291,60 @@
           "en_expansion": "CFO approval process"
         }
       ]
+    },
+    "045f7af3c429e149": {
+      "filename": "Danone_Nutrilon_Recall_Products.pdf",
+      "model_used": "ollama/qwen3:8b",
+      "concepts": [
+        {
+          "concept_id": "concept:045f7a_1",
+          "en_triggers": [
+            "nutrilon ar 2 800g",
+            "nutrilon opvolgmelk 3 800g",
+            "nutrilon volledige zuigelingenvoeding 1 800g",
+            "nutrilon content 1",
+            "nutrilon duobalans 2 800g",
+            "nutrilon duobalans 1 800g",
+            "nutrilon volledige zuigelingenvoeding 1 1.2kg"
+          ],
+          "zh_triggers": [
+            "Nutrilon AR 2 800G",
+            "Nutrilon 跟進奶粉 3 800g",
+            "Nutrilon 完全嬰兒配方 1 800g",
+            "Nutrilon Content 1",
+            "Nutrilon Duobalans 2 800g",
+            "Nutrilon Duobalans 1 800g",
+            "Nutrilon 完全嬰兒配方 1 1.2kg"
+          ],
+          "en_expansion": "Product names of Nutrilon infant formula"
+        },
+        {
+          "concept_id": "concept:045f7a_2",
+          "en_triggers": [
+            "batch nummer",
+            "ten minste houdbaar tot"
+          ],
+          "zh_triggers": [
+            "批次號",
+            "保質期"
+          ],
+          "en_expansion": "Batch number and expiration date"
+        },
+        {
+          "concept_id": "concept:045f7a_3",
+          "en_triggers": [
+            "verpakking type",
+            "eazypack",
+            "blik (metaal)"
+          ],
+          "zh_triggers": [
+            "包裝類型",
+            "EAZYPACK",
+            "罐裝"
+          ],
+          "en_expansion": "Product packaging type"
+        }
+      ]
     }
   },
   "query_cache": {

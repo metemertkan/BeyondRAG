@@ -55,6 +55,13 @@ def test_ingestion_idempotency_avoids_duplicate_chunks():
     chunks_count_pass2 = len(repo.es_manager.memory_chunks)
 
     assert chunks_count_pass1 == chunks_count_pass2
+    # Verify staged file is preserved after ingestion
+    doc_id = meta2["doc_id"]
+    file_path = repo.uploads_dir / f"{doc_id}_Treasury_Doc.txt"
+    assert file_path.exists(), "Uploaded file must be preserved in uploads directory after indexing"
+    # Clean up test artifact
+    repo.delete_document(doc_id)
+    assert not file_path.exists(), "delete_document must clean up uploaded file"
 
 
 def test_ingestion_failure_triggers_clean_rollback():

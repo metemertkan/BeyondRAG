@@ -168,8 +168,8 @@ class DocumentRepository:
                     rec["acl_tags"] = acl_tags
                     rec["is_public"] = is_public
 
-    def delete_document(self, doc_id: str) -> Dict[str, Any]:
-        """Remove a document's indexed chunks and its saved PDF file."""
+    def delete_chunks(self, doc_id: str) -> None:
+        """Remove a document's indexed chunks from Elasticsearch and memory without deleting the uploaded file."""
         if self.es_manager.is_online():
             self.es_manager.ensure_index()
             self.es_manager.client.delete_by_query(
@@ -180,6 +180,10 @@ class DocumentRepository:
         self.es_manager.memory_chunks = [
             c for c in self.es_manager.memory_chunks if c.get("doc_id") != doc_id
         ]
+
+    def delete_document(self, doc_id: str) -> Dict[str, Any]:
+        """Remove a document's indexed chunks and its saved PDF file."""
+        self.delete_chunks(doc_id)
         self.delete_upload_file(doc_id)
         self._doc_states.pop(doc_id, None)
         return {"deleted": True, "doc_id": doc_id}

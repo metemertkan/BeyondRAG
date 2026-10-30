@@ -128,17 +128,20 @@ def get_llm(role: str = "architect", temperature: float = 0.2) -> BaseChatModel:
     )
 
     installed_models = _detect_host_ollama_models(OLLAMA_BASE_URL)
-    fallback_chain: list[BaseChatModel] = [ollama_llm]
     if installed_models and ollama_model_name not in installed_models:
+        # Prioritize the active/installed model so queries do not waste time failing on unpulled tags
         host_active_model = installed_models[0]
-        fallback_chain.append(
+        fallback_chain: list[BaseChatModel] = [
             ChatOllama(
                 model=host_active_model,
                 base_url=OLLAMA_BASE_URL,
                 temperature=temperature,
                 reasoning=False,
-            )
-        )
+            ),
+            ollama_llm,
+        ]
+    else:
+        fallback_chain = [ollama_llm]
 
     if USE_LOCAL_ONLY or not is_valid_api_key(GOOGLE_API_KEY):
         if len(fallback_chain) > 1:

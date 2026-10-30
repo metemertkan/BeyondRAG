@@ -145,8 +145,11 @@ class PdfIngestor:
                         }
                     )
 
-            # 7. Idempotently replace existing chunks in repository
-            self._repository.delete_document(assigned_doc_id)
+            # 7. Idempotently replace existing chunks in repository without deleting uploaded file
+            if hasattr(self._repository, "delete_chunks"):
+                self._repository.delete_chunks(assigned_doc_id)
+            else:
+                self._repository.delete_document(assigned_doc_id)
             self._repository.save_chunks(chunk_records)
 
             # 8. State: INDEXED
