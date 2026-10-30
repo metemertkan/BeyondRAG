@@ -212,15 +212,15 @@ def get_concept_registry() -> DynamicConceptRegistry:
 
 
 def _select_ollama_model() -> str:
-    env_model = os.getenv("OLLAMA_MODEL")
-    if env_model:
-        return env_model
+    env_model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
     available = _detect_host_ollama_models(OLLAMA_BASE_URL)
+    if available and env_model in available:
+        return env_model
     # Prefer lightweight low-resource models first so experiments run fast on CPU/weak GPU
     for preferred in ("qwen2.5:1.5b", "qwen2.5:0.5b", "llama3.2:1b", "qwen2.5:7b", "qwen3:8b"):
         if preferred in available:
             return preferred
-    return available[0] if available else "qwen2.5:1.5b"
+    return env_model
 
 
 def extract_bilingual_concepts_at_ingestion(

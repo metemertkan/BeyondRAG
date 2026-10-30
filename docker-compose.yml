@@ -12,6 +12,7 @@ services:
       - WEB_PORT=8090
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:1.5b}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - USE_LOCAL_ONLY=${USE_LOCAL_ONLY:-false}
     extra_hosts:

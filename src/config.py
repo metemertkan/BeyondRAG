@@ -116,11 +116,11 @@ def get_llm(role: str = "architect", temperature: float = 0.2) -> BaseChatModel:
     else:
         gemini_model_name = "gemini-2.5-pro"
 
-    env_ollama_model = os.getenv("OLLAMA_MODEL")
+    env_ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
     installed_models = _detect_host_ollama_models(OLLAMA_BASE_URL)
 
     # Determine default Ollama model: env override > installed lightweight models > default tag
-    if env_ollama_model:
+    if env_ollama_model and (not installed_models or env_ollama_model in installed_models):
         ollama_model_name = env_ollama_model
     elif installed_models:
         selected = None
@@ -130,9 +130,7 @@ def get_llm(role: str = "architect", temperature: float = 0.2) -> BaseChatModel:
                 break
         ollama_model_name = selected or installed_models[0]
     else:
-        ollama_model_name = (
-            "qwen2.5-coder:14b" if normalized_role == "coder" else "llama3.2:latest"
-        )
+        ollama_model_name = "qwen2.5:1.5b"
 
     ollama_llm = ChatOllama(
         model=ollama_model_name,
