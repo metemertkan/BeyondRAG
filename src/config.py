@@ -116,9 +116,23 @@ def get_llm(role: str = "architect", temperature: float = 0.2) -> BaseChatModel:
     else:
         gemini_model_name = "gemini-2.5-pro"
 
-    ollama_model_name = (
-        "qwen2.5-coder:14b" if normalized_role == "coder" else "llama3.2:latest"
-    )
+    env_ollama_model = os.getenv("OLLAMA_MODEL")
+    installed_models = _detect_host_ollama_models(OLLAMA_BASE_URL)
+
+    # Determine default Ollama model: env override > installed lightweight models > default tag
+    if env_ollama_model:
+        ollama_model_name = env_ollama_model
+    elif installed_models:
+        selected = None
+        for pref in ("qwen2.5:1.5b", "qwen2.5:0.5b", "llama3.2:1b", "qwen3:8b"):
+            if pref in installed_models:
+                selected = pref
+                break
+        ollama_model_name = selected or installed_models[0]
+    else:
+        ollama_model_name = (
+            "qwen2.5-coder:14b" if normalized_role == "coder" else "llama3.2:latest"
+        )
 
     ollama_llm = ChatOllama(
         model=ollama_model_name,
@@ -127,21 +141,17 @@ def get_llm(role: str = "architect", temperature: float = 0.2) -> BaseChatModel:
         reasoning=False,
     )
 
-    installed_models = _detect_host_ollama_models(OLLAMA_BASE_URL)
+    fallback_chain: list[BaseChatModel] = [ollama_llm]
     if installed_models and ollama_model_name not in installed_models:
-        # Prioritize the active/installed model so queries do not waste time failing on unpulled tags
-        host_active_model = installed_models[0]
-        fallback_chain: list[BaseChatModel] = [
+        fallback_chain.insert(
+            0,
             ChatOllama(
-                model=host_active_model,
+                model=installed_models[0],
                 base_url=OLLAMA_BASE_URL,
                 temperature=temperature,
                 reasoning=False,
             ),
-            ollama_llm,
-        ]
-    else:
-        fallback_chain = [ollama_llm]
+        )
 
     if USE_LOCAL_ONLY or not is_valid_api_key(GOOGLE_API_KEY):
         if len(fallback_chain) > 1:
