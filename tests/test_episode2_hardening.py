@@ -62,11 +62,7 @@ def _ingestor(repo: DocumentRepository, **kwargs: Any) -> PdfIngestor:
 
 
 def test_ep1_baseline_without_shared_source_key_both_versions_stay_searchable():
-    """Ep1-style gap: different filenames → different source_keys → both INDEXED & searchable.
-
-    Matches Shorts observation on ``main``: cash-buffer query can surface both
-    ``HKD 450,000,000`` and ``HKD 520,000,000`` when soft supersede is not applied.
-    """
+    """Ep2-branch sim: different filenames → different source_keys → both INDEXED in storage."""
     repo = _memory_repo()
     ingestor = _ingestor(repo)
     m1 = ingestor.ingest(POLICY_V1.name, POLICY_V1.read_bytes(), tags=["finance"])
@@ -85,6 +81,38 @@ def test_ep1_baseline_without_shared_source_key_both_versions_stay_searchable():
     )
     assert "450,000,000" in joined
     assert "520,000,000" in joined
+
+
+def test_main_branch_search_query_returns_both_cash_buffer_markers():
+    """Claim-matrix R3: actual HybridRetriever.search on **main** (Ep1) code.
+
+    Uses ``scripts/verify_main_dual_version_search.py`` (git worktree of ``main``).
+    Observed: cash-buffer search authorized hits contain both ``450,000,000`` and
+    ``520,000,000`` when v1+v2 are ingested without soft supersede.
+    """
+    import json
+    import subprocess
+    import sys
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "verify_main_dual_version_search.py"
+    assert script.is_file()
+    proc = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=str(script.parents[1]),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, (
+        f"main dual-version search failed (rc={proc.returncode}): "
+        f"stdout={proc.stdout[-1500:]} stderr={proc.stderr[-1500:]}"
+    )
+    payload = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert payload.get("ok") is True
+    assert payload.get("branch_ref") == "main"
+    assert payload.get("search_has_450") is True
+    assert payload.get("search_has_520") is True
+    assert payload.get("hit_count", 0) >= 1
 
 
 def test_tenant_prefix_in_source_key_and_non_default_doc_id():

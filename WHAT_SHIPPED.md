@@ -42,6 +42,12 @@
 - **v1 liquidity fixture alone does not prove “flat missed the number”** — on `policy_v1_liquidity_table.pdf` PyPDF still contains `450,000,000`. Use `policy_mispaired_limits_table.pdf` for the Short flattened→wrong-association beat.
 - **Live Elasticsearch SUPERSEDED integration test:** not run in CI (no ES in unit env). Mapping fields + memory-filter tests ship; **docker-compose smoke** documented in README Episode 2 section.
 
+## Claim-matrix R3 (Ep1 dual-version search on `main`)
+
+**CLAIMED (backed):** `scripts/verify_main_dual_version_search.py` + `test_main_branch_search_query_returns_both_cash_buffer_markers` — git worktree of **`main`**, ingest v1+v2 with Ep1 `PdfIngestor`, run `HybridRetriever.search("intraday unencumbered HKD cash buffer threshold")`. Observed: `search_has_450=true`, `search_has_520=true`.
+
+Ep2-branch storage sim (`test_ep1_baseline_without_shared_source_key_both_versions_stay_searchable`) remains a weaker companion (“searchable chunks contain both”) and is not sufficient alone for the Short/content claim.
+
 ## Dashboard / API (Short demo)
 
 - Upload accepts `.pdf` / `.md` / `.txt`; optional `source_key` form field (UI + API).
