@@ -149,11 +149,69 @@ def make_multicolumn(path: Path) -> None:
     c.save()
 
 
+def make_mispaired_limits_table(path: Path) -> None:
+    """Finance limits table painted column-major so plain PyPDF mis-pairs label→value.
+
+    Content stream writes all Limit-type cells first, then all Threshold cells.
+    Observed PyPDF reading order clusters labels together, then values — the line
+    after ``Intraday cash buffer`` is another label, not ``HKD 450,000,000``.
+    pdfplumber still recovers correct row pairs via table extraction.
+    """
+    c = canvas.Canvas(str(path), pagesize=A4)
+    _width, height = A4
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(40, height - 50, "HK Treasury Limit Register — Q4 (synthetic)")
+    c.setFont("Helvetica", 9)
+    c.drawString(
+        40,
+        height - 68,
+        "RESTRICTED — FINANCE. Synthetic limits for Episode 2 flat vs layout-aware demos.",
+    )
+    headers = ["Limit type", "Threshold"]
+    labels = [
+        "Intraday cash buffer",
+        "FX forward approval floor",
+        "Unhedged CNY exposure cap",
+    ]
+    values = [
+        "HKD 450,000,000",
+        "USD 10,000,000",
+        "HKD 85,000,000",
+    ]
+    x0, x1 = 40, 310
+    y0 = height - 100
+    row_h = 26
+    # Column-major paint: entire left column, then entire right column.
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(x0 + 6, y0, headers[0])
+    c.setFont("Helvetica", 10)
+    for i, lab in enumerate(labels):
+        c.drawString(x0 + 6, y0 - (i + 1) * row_h, lab)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(x1 + 6, y0, headers[1])
+    c.setFont("Helvetica", 10)
+    for i, val in enumerate(values):
+        c.drawString(x1 + 6, y0 - (i + 1) * row_h, val)
+    for i in range(4):
+        y = y0 - i * row_h + 14
+        c.setStrokeColor(colors.grey)
+        c.rect(x0, y - row_h, x1 - x0, row_h)
+        c.rect(x1, y - row_h, 220, row_h)
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawString(
+        40,
+        60,
+        "Plain-text extractors often emit labels then values; layout-aware table parse keeps row pairs.",
+    )
+    c.save()
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     make_policy_v1(OUT / "policy_v1_liquidity_table.pdf")
     make_policy_v2(OUT / "policy_v2_liquidity_table.pdf")
     make_multicolumn(OUT / "ops_compliance_multicolumn.pdf")
+    make_mispaired_limits_table(OUT / "policy_mispaired_limits_table.pdf")
     for p in sorted(OUT.glob("*.pdf")):
         print(f"{p.name}: {p.stat().st_size} bytes")
 

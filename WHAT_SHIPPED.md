@@ -13,7 +13,8 @@
 | Durable document registry | JSON sidecar `workspace/document_registry.json` via `DocumentRepository` (`persist_registry=True` in `service.py`) |
 | Layout-aware PDF parser + offline fallback | Primary: **pdfplumber** (`PdfPlumberDocumentParser`). Offline fallback: **PyPDF** (`PyPdfDocumentParser`). Docling deferred (heavier deps / Docker). PyMuPDF deferred (AGPL). |
 | Table + multi-column fixtures | `tests/fixtures/pdfs/*`; `scripts/generate_ep2_fixtures.py` |
-| Before/after table extract | `test_before_after_table_retrieval_structure_beats_flat_pypdf` |
+| Before/after table extract (presence + blocks) | `test_before_after_table_retrieval_structure_beats_flat_pypdf` (v1 fixture — both paths may still contain `450,000,000`) |
+| Before/after **label↔value mis-pair** (Short T2/T3) | Fixture `policy_mispaired_limits_table.pdf` (column-major paint); `test_flat_pypdf_mispairs_limit_label_layout_aware_keeps_row` — flat next-line neighbor is `FX forward approval floor`; layout-aware row keeps `Intraday cash buffer` + `HKD 450,000,000` |
 | Chunk metadata `block_type`, `page_number`, stable `chunk_id`; ACL preserved | `ingestor._build_chunks_from_blocks`; `test_ingestion_preserves_acl_tags_on_chunks` |
 | Embedding contract: Ollama `bge-m3` + remote API + CI `feature_hash` | `create_embedding_provider` in `src/rag/embeddings.py` |
 | Manifest mismatch fails fast at ingest | `PdfIngestor(expected_manifest=...)` + index manifest lock; `test_embedding_manifest_mismatch_fails_fast_at_ingest` |
@@ -31,9 +32,19 @@
 4. **Durable registry storage:** `workspace/document_registry.json` (documents, `current_by_source_key`, `index_embedding_manifest`).
 5. **Run locally branch:** `cursor/episode-2-ingestion-b42f`.
 
-## Explicitly not shipped
+## Explicitly not shipped / unclaimed
 
 - Full OCR / handwriting
 - Excel production parser
 - Docling / PyMuPDF as default
-- Invented benchmark numbers (before/after asserts marker presence only)
+- Invented benchmark numbers
+- **ZH query → EN table cell end-to-end retrieval demo:** **explicitly unclaimed this episode.** Language packs + JA detect are tested; a live ZH→EN table-cell retrieval under Finance + bge-m3 is not covered by a dedicated acceptance test (would need a live embedding model or a canned expansion that overclaims). Do not show it in Short/Hashnode as shipped proof.
+- **v1 liquidity fixture alone does not prove “flat missed the number”** — on `policy_v1_liquidity_table.pdf` PyPDF still contains `450,000,000`. Use `policy_mispaired_limits_table.pdf` for the Short flattened→wrong-association beat.
+
+## Short fixture guidance (Manager / Shorts)
+
+| Beat | Fixture | Observed failure mode |
+| --- | --- | --- |
+| Flattened table / wrong association | `tests/fixtures/pdfs/policy_mispaired_limits_table.pdf` | Flat next line after `Intraday cash buffer` = `FX forward approval floor`; value appears later in stream |
+| Layout-aware fix | same file via pdfplumber | Table row `\| Intraday cash buffer \| HKD 450,000,000 \|` |
+| Version supersede | `policy_v1` → `policy_v2` same `source_key` | Soft `SUPERSEDED` |

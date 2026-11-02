@@ -100,9 +100,11 @@ BeyondRAG/
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `RAG_EMBEDDING_PROVIDER` | `feature_hash` | Active embedding provider: `feature_hash`, `ollama`, `google`, or `fake`. |
+| `RAG_EMBEDDING_PROVIDER` | `feature_hash` | Active embedding provider: `feature_hash`, `ollama`, `remote_api`, `google`, or `fake`. |
 | `RAG_EMBEDDING_DIMS` | `256` | Vector dimensions for Elasticsearch dense_vector indexing. |
-| `RAG_EMBEDDING_MODEL` | `bge-m3` | Embedding model identifier when using `ollama` or `google`. |
+| `RAG_EMBEDDING_MODEL` | `bge-m3` | Embedding model when using `ollama`, `remote_api`, or `google`. |
+| `RAG_EMBEDDING_API_KEY` | _(empty)_ | API key for `remote_api` (OpenAI-compatible). Alias: `OPENAI_API_KEY`. |
+| `RAG_EMBEDDING_API_BASE` | `https://api.openai.com/v1` | Base URL for `remote_api` embeddings. |
 | `RAG_CHUNKING_STRATEGY` | `sliding_window` | Active chunking algorithm: `sliding_window`, `paragraph`, `sentence`, `recursive`. |
 | `RAG_CHUNK_MAX_TOKENS` | `500` | Maximum token/character limit per chunk. |
 | `RAG_CHUNK_OVERLAP_TOKENS`| `80` | Overlap budget between consecutive chunks. |

@@ -26,6 +26,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "pdfs"
 POLICY_V1 = FIXTURES / "policy_v1_liquidity_table.pdf"
 POLICY_V2 = FIXTURES / "policy_v2_liquidity_table.pdf"
 MULTICOL = FIXTURES / "ops_compliance_multicolumn.pdf"
+POLICY_MISPAIRED = FIXTURES / "policy_mispaired_limits_table.pdf"
 
 # Stable logical identity used by versioning demos (Coder may rename; keep in sync).
 SOURCE_KEY_TREASURY = "hk-treasury-fx-liquidity-q4"
@@ -121,6 +122,7 @@ def test_ep2_fixtures_present_and_distinct():
     assert POLICY_V1.is_file() and POLICY_V1.stat().st_size > 500
     assert POLICY_V2.is_file() and POLICY_V2.stat().st_size > 500
     assert MULTICOL.is_file() and MULTICOL.stat().st_size > 500
+    assert POLICY_MISPAIRED.is_file() and POLICY_MISPAIRED.stat().st_size > 500
     assert POLICY_V1.read_bytes() != POLICY_V2.read_bytes()
 
 
@@ -398,6 +400,80 @@ def test_before_after_table_retrieval_structure_beats_flat_pypdf():
     assert "450,000,000" in joined
     # Preserve flat_has only as observed evidence for the matrix (not a pass/fail invent).
     assert isinstance(flat_has, bool)
+
+
+@pytest.mark.ep2
+def test_flat_pypdf_mispairs_limit_label_layout_aware_keeps_row():
+    """Honest before/after for Short: flat PyPDF breaks label↔value association.
+
+    Fixture ``policy_mispaired_limits_table.pdf`` is painted column-major. Observed
+    PyPDF order puts another label immediately after ``Intraday cash buffer``; the
+    correct threshold still appears later in the stream (not adjacent). Layout-aware
+    table extract keeps both on the same row. Asserts observed strings only.
+    """
+    if not _layout_parser_available():
+        pytest.skip("Layout-aware parser required for mis-pair before/after demo")
+    assert POLICY_MISPAIRED.is_file()
+
+    raw = POLICY_MISPAIRED.read_bytes()
+    _total, flat_pages = PyPdfDocumentParser().extract_pages(raw)
+    flat_blob = "\n".join(t for _, t in flat_pages)
+    flat_lines = [ln.strip() for ln in flat_blob.splitlines() if ln.strip()]
+    assert "Intraday cash buffer" in flat_lines
+    label_idx = flat_lines.index("Intraday cash buffer")
+    # Observed mis-pair: next non-empty line is another limit label, not the threshold.
+    observed_neighbor = flat_lines[label_idx + 1]
+    assert observed_neighbor == "FX forward approval floor", (
+        f"expected flat neighbor mis-pair, observed {observed_neighbor!r}"
+    )
+    # Number still present somewhere in the flat stream (not a fake 'missing' claim).
+    assert "HKD 450,000,000" in flat_blob
+    # But not on the same line as the label under flat extract.
+    label_line = flat_lines[label_idx]
+    assert "450,000,000" not in label_line
+
+    registry = DocumentParserRegistry()
+    parser = registry.get_parser(POLICY_MISPAIRED.name)
+    assert hasattr(parser, "extract_blocks")
+    blocks = parser.extract_blocks(raw)  # type: ignore[attr-defined]
+    table_texts = [
+        str(b.get("text", ""))
+        for b in blocks
+        if isinstance(b, dict) and str(b.get("block_type", "")).lower() == "table"
+    ]
+    assert table_texts, "layout-aware parser emitted no table blocks"
+    paired_row = None
+    for table in table_texts:
+        for line in table.splitlines():
+            if "Intraday cash buffer" in line and "450,000,000" in line:
+                paired_row = line
+                break
+    assert paired_row is not None, (
+        "layout-aware table row must contain both label and HKD 450,000,000"
+    )
+
+    # Naive "next line after label" association — what a flattened stream encourages.
+    # Flat: wrong neighbor. Structure: markdown row carries the real threshold.
+    flat_naive_value = observed_neighbor
+    assert flat_naive_value != "HKD 450,000,000"
+    struct_naive_ok = "HKD 450,000,000" in paired_row and "Intraday cash buffer" in paired_row
+    assert struct_naive_ok is True
+
+    # Structured ingest indexes a chunk that preserves the correct pair (for Short after-clip).
+    repo = _memory_repo()
+    ingestor = _make_ingestor(repo, extractor=registry)
+    meta = ingestor.ingest(POLICY_MISPAIRED.name, raw, tags=["finance"])
+    assert meta["status"] == IngestionState.INDEXED.value
+    matched = [
+        c
+        for c in repo.es_manager.memory_chunks
+        if "Intraday cash buffer" in c.get("content", "") and "450,000,000" in c.get("content", "")
+    ]
+    assert matched, "structured ingest must index a chunk with both label and threshold"
+
+    # Honesty note for content: on this short page flat PyPDF still *contains*
+    # ``HKD 450,000,000`` elsewhere in the stream — the failure mode is
+    # **mis-association** (wrong next-line neighbor), not total omission.
 
 
 # ---------------------------------------------------------------------------
