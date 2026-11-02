@@ -21,22 +21,34 @@ from typing import Any, Callable, Dict, Final, List, Optional, Protocol, Tuple
 import httpx
 
 from src.config import OLLAMA_BASE_URL, WORKSPACE_DIR, _detect_host_ollama_models, get_llm
+from src.rag.language_packs import (
+    LanguagePack,
+    LanguagePackRegistry,
+    get_language_pack_registry,
+)
 from src.rag.models import Concept
+
+# Re-export for Episode 2 acceptance / data-driven language hooks.
+__all__ = [
+    "LanguagePack",
+    "LanguagePackRegistry",
+    "load_language_pack",
+    "MultilingualQueryAdapter",
+    "RuleBasedLanguageDetector",
+    "DefaultCrossLingualAdapter",
+]
 
 logger = logging.getLogger(__name__)
 
 _CJK_CHAR_RE: Final[re.Pattern[str]] = re.compile(r"[\u4e00-\uffff]")
-_HIRAGANA_KATAKANA_RE: Final[re.Pattern[str]] = re.compile(r"[\u3040-\u30ff]")
-_HANGUL_RE: Final[re.Pattern[str]] = re.compile(r"[\uac00-\ud7af]")
-_CYRILLIC_RE: Final[re.Pattern[str]] = re.compile(r"[\u0400-\u04ff]")
-_ARABIC_RE: Final[re.Pattern[str]] = re.compile(r"[\u0600-\u06ff]")
 
 DYNAMIC_CONCEPTS_PATH: Final[Path] = WORKSPACE_DIR / "dynamic_concepts.json"
 
-_GENERIC_CJK_BIGRAMS: Final[set[str]] = {
-    "政策", "規定", "规定", "什麼", "什么", "請問", "请问", "公司", "香港", "要求",
-    "多少", "時間", "时间", "工作", "管理", "系統", "系统", "標準", "标准", "部門", "部门",
-}
+
+def load_language_pack(path: str | Path | None = None) -> LanguagePackRegistry:
+    """Load language packs from JSON (config/data-driven; EN/ZH are default data)."""
+    packs_path = Path(path) if path else None
+    return LanguagePackRegistry(packs_path=packs_path)
 
 
 class LanguageDetector(Protocol):
@@ -71,58 +83,71 @@ class ConceptExtractor(Protocol):
 
 
 class RuleBasedLanguageDetector:
-    """Robust rule-based language detector distinguishing scripts and common vocabulary."""
+    """Data-driven language detector backed by :class:`LanguagePackRegistry`."""
+
+    def __init__(self, pack_registry: Optional[LanguagePackRegistry] = None) -> None:
+        self.pack_registry = pack_registry or get_language_pack_registry()
 
     def detect(self, text: str) -> str:
         if not text or not text.strip():
-            return "en"
+            return self.pack_registry.corpus_language or "en"
 
         cleaned = text.strip()
+        # Prefer non-CJK script packs first (JA/KO/RU/AR) so Han-overlap languages win.
+        priority = ["ja", "ko", "ru", "ar", "zh", "fr", "es", "de", "tr"]
+        ordered = [c for c in priority if self.pack_registry.get(c)]
+        ordered.extend(
+            c for c in self.pack_registry.supported_languages if c not in ordered and c != "en"
+        )
 
-        # Script-based detections
-        if _HIRAGANA_KATAKANA_RE.search(cleaned):
-            return "ja"
-        if _HANGUL_RE.search(cleaned):
-            return "ko"
-        if _CYRILLIC_RE.search(cleaned):
-            return "ru"
-        if _ARABIC_RE.search(cleaned):
-            return "ar"
-        # Japanese specific markers
-        if any(c in cleaned for c in ["号", "警報", "円", "の", "は", "に", "を"]):
-            if any(ord(c) in range(0x3040, 0x30FF) for c in cleaned) or "の" in cleaned:
-                return "ja"
-        if _CJK_CHAR_RE.search(cleaned):
-            return "zh"
-
-        # Latin text: check for language-specific marker words / accents without misclassifying generic English
-        lowered = f" {cleaned.lower()} "
-        if any(w in lowered for w in [" quelle ", " quel ", " est ", " du ", " des ", " dans ", " avec ", " télétravail "]):
-            return "fr"
-        if any(w in lowered for w in [" cuál ", " el ", " los ", " las ", " por ", " para ", " cómo ", "¿"]):
-            return "es"
-        if any(w in lowered for w in [" der ", " die ", " das ", " und ", " nicht ", " mit ", " wie "]):
-            return "de"
+        for code in ordered:
+            pack = self.pack_registry.get(code)
+            if pack is None:
+                continue
+            for pattern in pack.compiled_scripts():
+                if pattern.search(cleaned):
+                    return code
+            if pack.marker_words:
+                # Strip punctuation so ¿Cuál / cómo? still match pack markers.
+                normalized = re.sub(r"[^\w\s]", " ", cleaned.lower(), flags=re.UNICODE)
+                padded = f" {normalized} "
+                if any(f" {w} " in padded for w in pack.marker_words):
+                    return code
 
         return "en"
 
 
-def _matches_zh_triggers(text: str, zh_triggers: List[str]) -> bool:
-    """Return True if text matches a Chinese trigger phrase or shares a domain CJK 2-gram."""
-    if not _CJK_CHAR_RE.search(text):
+def _matches_pack_triggers(
+    text: str,
+    triggers: List[str],
+    *,
+    generic_bigrams: Optional[set[str]] = None,
+) -> bool:
+    """Return True if text matches a trigger phrase (script-aware bigram fallback for CJK)."""
+    if not triggers:
         return False
-    for zt in zh_triggers:
+    blocked = generic_bigrams or set()
+    for zt in triggers:
         if not zt:
             continue
         if zt in text:
             return True
-        if len(zt) >= 2:
+        if len(zt) >= 2 and _CJK_CHAR_RE.search(zt):
             for i in range(len(zt) - 1):
                 bg = zt[i : i + 2]
-                if len(_CJK_CHAR_RE.findall(bg)) == 2 and bg not in _GENERIC_CJK_BIGRAMS:
+                if len(_CJK_CHAR_RE.findall(bg)) == 2 and bg not in blocked:
                     if bg in text:
                         return True
     return False
+
+
+def _matches_zh_triggers(text: str, zh_triggers: List[str]) -> bool:
+    """Backward-compatible ZH trigger helper; bigrams come from the ZH language pack."""
+    if not _CJK_CHAR_RE.search(text):
+        return False
+    pack = get_language_pack_registry().get("zh")
+    generic = set(pack.generic_bigrams) if pack else set()
+    return _matches_pack_triggers(text, zh_triggers, generic_bigrams=generic)
 
 
 class DynamicConceptRegistry:
@@ -402,16 +427,20 @@ class MultilingualQueryAdapter:
         detector: Optional[LanguageDetector] = None,
         translator: Optional[QueryTranslator] = None,
         extractor: Optional[ConceptExtractor] = None,
-        corpus_language: str = "en",
+        corpus_language: Optional[str] = None,
         supported_languages: Optional[List[str]] = None,
+        language_pack: Optional[LanguagePackRegistry] = None,
     ) -> None:
-        self.detector = detector or RuleBasedLanguageDetector()
+        self.language_pack = language_pack or get_language_pack_registry()
+        self.detector = detector or RuleBasedLanguageDetector(self.language_pack)
         self.translator = translator or LLMQueryTranslator()
         self.extractor = extractor or DynamicConceptExtractor()
-        self.corpus_language = corpus_language
-        self.supported_languages = supported_languages or [
-            "en", "zh", "ja", "ko", "es", "fr", "de", "ru", "ar"
-        ]
+        self.corpus_language = (
+            corpus_language
+            or self.language_pack.corpus_language
+            or os.getenv("RAG_CORPUS_LANGUAGE", "en")
+        )
+        self.supported_languages = supported_languages or list(self.language_pack.supported_languages)
 
     def is_cross_lingual(self, text: str) -> bool:
         """Return True if text language differs from corpus language."""

@@ -98,22 +98,35 @@ async def get_documents() -> Dict[str, Any]:
     }
 
 
+_ALLOWED_UPLOAD_SUFFIXES = {".pdf", ".md", ".markdown", ".txt"}
+
+
 @app.post("/api/upload")
 async def upload_pdf(
     file: UploadFile = File(...),
     tags: str = Form(default=""),
+    tenant: str = Form(default="default"),
+    source_key: str = Form(default=""),
 ) -> Dict[str, Any]:
-    """Upload a PDF document, extract and chunk text, and index with RBAC tags (or public if untagged)."""
+    """Upload a document (PDF, Markdown, or plain text), chunk, and index with RBAC tags.
+
+    Excel (.xlsx) is intentionally not accepted this episode; the parser registry
+    remains pluggable for a future adapter.
+    """
     filename = file.filename or "uploaded_document.pdf"
-    if not filename.lower().endswith(".pdf"):
+    suffix = Path(filename).suffix.lower()
+    if suffix not in _ALLOWED_UPLOAD_SUFFIXES:
         raise HTTPException(
             status_code=400,
-            detail="Only .pdf files are supported. Please upload a valid PDF document.",
+            detail=(
+                "Supported uploads this episode: .pdf, .md, .txt. "
+                "Excel (.xlsx) is deferred; register an adapter later."
+            ),
         )
 
     pdf_bytes = await file.read()
     if not pdf_bytes:
-        raise HTTPException(status_code=400, detail="Uploaded PDF file is empty.")
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
     parsed_tags = normalize_tags(tags)
     kb = get_kb_service()
@@ -122,12 +135,14 @@ async def upload_pdf(
             filename=filename,
             pdf_bytes=pdf_bytes,
             tags=parsed_tags,
+            tenant=tenant or "default",
+            source_key=source_key.strip() or None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(
-            status_code=500, detail=f"Failed to index PDF: {exc}"
+            status_code=500, detail=f"Failed to index document: {exc}"
         ) from exc
 
     return {

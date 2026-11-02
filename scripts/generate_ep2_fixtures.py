@@ -97,7 +97,7 @@ def make_policy_v2(path: Path) -> None:
     )
     note = Paragraph(
         "v2 markers for supersession tests: HKD 520,000,000; LCR 110%. "
-        "v1-only value HKD 450,000,000 must not appear in current retrieval.",
+        "Prior revision thresholds must not remain searchable after soft supersession.",
         styles["Italic"],
     )
     doc.build([title, Spacer(1, 12), body, Spacer(1, 16), table, Spacer(1, 16), note])

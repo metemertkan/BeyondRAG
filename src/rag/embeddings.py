@@ -2,10 +2,14 @@
 
 Defines the strongly typed EmbeddingProvider interface, EmbeddingManifest,
 and production-ready implementations:
-  - FeatureHashEmbeddingProvider (deterministic development/testing provider)
-  - OllamaEmbeddingProvider (local Ollama daemon, e.g. bge-m3, qwen3:8b)
+  - FeatureHashEmbeddingProvider (deterministic development/testing / CI fallback)
+  - OllamaEmbeddingProvider (local Ollama daemon, e.g. bge-m3)
+  - RemoteApiEmbeddingProvider (OpenAI-compatible remote API via user API key)
   - GoogleEmbeddingProvider (Google text-embedding-004 via API key)
   - DeterministicFakeEmbeddingProvider (for fast, isolated unit testing)
+
+Episode 2 ingest contract: active provider manifest is locked into the durable
+document registry; mismatched provider/model/dims fail fast at ingest.
 """
 
 from __future__ import annotations
@@ -14,8 +18,8 @@ import hashlib
 import math
 import os
 import re
-from dataclasses import dataclass, field
-from typing import Any, Dict, Final, List, Optional, Protocol
+from dataclasses import dataclass
+from typing import Final, List, Optional, Protocol
 
 import httpx
 
@@ -23,6 +27,10 @@ from src.config import GOOGLE_API_KEY, OLLAMA_BASE_URL, is_valid_api_key
 
 _TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9_]+|[\u4e00-\uffff]+", re.IGNORECASE)
 _CJK_CHAR_RE: Final[re.Pattern[str]] = re.compile(r"[\u4e00-\uffff]")
+
+
+class EmbeddingManifestMismatchError(ValueError):
+    """Raised when the active embedding contract does not match the index contract."""
 
 
 @dataclass(frozen=True)
@@ -46,6 +54,30 @@ class EmbeddingManifest:
                 "config_identifier",
                 f"{self.provider}::{self.model_name}::{self.dimensions}::{self.distance_metric}",
             )
+
+
+def assert_manifest_compatible(
+    active: EmbeddingManifest,
+    expected_identifier: Optional[str],
+) -> None:
+    """Fail fast when the index was built under a different embedding contract."""
+    if not expected_identifier:
+        return
+    if active.config_identifier != expected_identifier:
+        raise EmbeddingManifestMismatchError(
+            "Embedding manifest mismatch at ingest: "
+            f"active={active.config_identifier!r} index={expected_identifier!r}. "
+            "Reindex the corpus or restore the original embedding provider before ingesting."
+        )
+
+
+def assert_vector_matches_manifest(vector: List[float], manifest: EmbeddingManifest) -> None:
+    """Fail fast when a provider returns a vector that disagrees with its declared dims."""
+    if len(vector) != manifest.dimensions:
+        raise EmbeddingManifestMismatchError(
+            f"Embedding vector length {len(vector)} does not match manifest "
+            f"dimensions {manifest.dimensions} ({manifest.config_identifier})."
+        )
 
 
 class EmbeddingProvider(Protocol):
@@ -85,7 +117,7 @@ def normalize_l2(vector: List[float]) -> List[float]:
 
 
 class FeatureHashEmbeddingProvider:
-    """Deterministic, zero-dependency semantic feature hashing provider for local dev and testing."""
+    """Deterministic, zero-dependency semantic feature hashing provider for local dev and CI."""
 
     def __init__(
         self,
@@ -166,13 +198,11 @@ class DeterministicFakeEmbeddingProvider:
         return self._dimensions
 
     def embed_query(self, text: str) -> List[float]:
-        # Generates a stable deterministic vector based on text length and ascii checksum
         val = sum(ord(c) for c in text) % 100 / 100.0
         vec = [val] * self._dimensions
         return normalize_l2(vec)
 
     def embed(self, text: str) -> List[float]:
-        """Adapter method fulfilling EmbedderPort."""
         return self.embed_query(text)
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
@@ -186,7 +216,7 @@ class DeterministicFakeEmbeddingProvider:
 
 
 class OllamaEmbeddingProvider:
-    """Ollama embedding adapter for local models (e.g. bge-m3, nomic-embed-text)."""
+    """Ollama embedding adapter for local models (default Episode 2 model: bge-m3)."""
 
     def __init__(
         self,
@@ -240,7 +270,6 @@ class OllamaEmbeddingProvider:
             normalized: List[List[float]] = []
             for vec in raw_embeddings:
                 if len(vec) != self._dimensions:
-                    # Adapt dimension mismatch if model provides different native dim
                     if len(vec) > self._dimensions:
                         vec = vec[: self._dimensions]
                     else:
@@ -251,6 +280,99 @@ class OllamaEmbeddingProvider:
             raise RuntimeError(
                 f"Failed to embed documents with Ollama model '{self.model_name}': {exc}"
             ) from exc
+
+    def embed(self, text: str) -> List[float]:
+        return self.embed_query(text)
+
+    async def aembed_query(self, text: str) -> List[float]:
+        return self.embed_query(text)
+
+    async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
+        return self.embed_documents(texts)
+
+
+class RemoteApiEmbeddingProvider:
+    """OpenAI-compatible remote embedding API using the caller's API key.
+
+    Env vars:
+      RAG_EMBEDDING_API_KEY   — required bearer/api key (also accepts OPENAI_API_KEY)
+      RAG_EMBEDDING_API_BASE  — default https://api.openai.com/v1
+      RAG_EMBEDDING_MODEL     — default bge-m3 (or text-embedding-3-small, etc.)
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model_name: Optional[str] = None,
+        dimensions: int = 1024,
+        base_url: Optional[str] = None,
+        timeout: float = 30.0,
+    ) -> None:
+        resolved_key = (
+            api_key
+            or os.getenv("RAG_EMBEDDING_API_KEY", "")
+            or os.getenv("OPENAI_API_KEY", "")
+        ).strip()
+        if not is_valid_api_key(resolved_key):
+            raise ValueError(
+                "Valid RAG_EMBEDDING_API_KEY (or OPENAI_API_KEY) required for RemoteApiEmbeddingProvider."
+            )
+        self.api_key = resolved_key
+        self.model_name = model_name or os.getenv("RAG_EMBEDDING_MODEL", "bge-m3")
+        self._dimensions = dimensions
+        self.base_url = (
+            base_url or os.getenv("RAG_EMBEDDING_API_BASE", "https://api.openai.com/v1")
+        ).rstrip("/")
+        self.timeout = timeout
+        self._manifest = EmbeddingManifest(
+            provider="remote_api",
+            model_name=self.model_name,
+            dimensions=dimensions,
+            model_version="openai-compatible",
+        )
+
+    @property
+    def manifest(self) -> EmbeddingManifest:
+        return self._manifest
+
+    @property
+    def dimensions(self) -> int:
+        return self._dimensions
+
+    def embed_query(self, text: str) -> List[float]:
+        return self.embed_documents([text])[0]
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        if not texts:
+            return []
+        url = f"{self.base_url}/embeddings"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        body = {"model": self.model_name, "input": texts}
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.post(url, headers=headers, json=body)
+            resp.raise_for_status()
+            data = resp.json()
+            entries = data.get("data", [])
+            if len(entries) != len(texts):
+                raise RuntimeError(
+                    f"Remote embedding API expected {len(texts)} vectors, got {len(entries)}"
+                )
+            vectors: List[List[float]] = []
+            for entry in sorted(entries, key=lambda e: int(e.get("index", 0))):
+                vals = list(entry.get("embedding") or [])
+                if len(vals) != self._dimensions:
+                    if len(vals) > self._dimensions:
+                        vals = vals[: self._dimensions]
+                    else:
+                        vals = vals + [0.0] * (self._dimensions - len(vals))
+                vectors.append(normalize_l2(vals))
+            return vectors
+
+    def embed(self, text: str) -> List[float]:
+        return self.embed_query(text)
 
     async def aembed_query(self, text: str) -> List[float]:
         return self.embed_query(text)
@@ -313,6 +435,9 @@ class GoogleEmbeddingProvider:
                 vectors.append(normalize_l2(vals))
             return vectors
 
+    def embed(self, text: str) -> List[float]:
+        return self.embed_query(text)
+
     async def aembed_query(self, text: str) -> List[float]:
         return self.embed_query(text)
 
@@ -326,7 +451,7 @@ def create_embedding_provider(
     model_name: Optional[str] = None,
 ) -> EmbeddingProvider:
     """Factory creating and validating configured embedding providers.
-    
+
     Never silently switches providers upon failure; validates compatibility upfront.
     """
     prov = (provider_name or os.getenv("RAG_EMBEDDING_PROVIDER", "feature_hash")).strip().lower()
@@ -337,27 +462,32 @@ def create_embedding_provider(
             dimensions=dims,
             model_name=model_name or "feature_hash_v1",
         )
-    elif prov == "ollama":
+    if prov == "ollama":
         target_model = model_name or os.getenv("RAG_EMBEDDING_MODEL", "bge-m3")
         return OllamaEmbeddingProvider(
             model_name=target_model,
-            dimensions=dims,
+            dimensions=dims if dimensions or os.getenv("RAG_EMBEDDING_DIMS") else 1024,
         )
-    elif prov in {"google", "gemini"}:
+    if prov in {"remote", "remote_api", "openai", "openai_compatible"}:
+        target_model = model_name or os.getenv("RAG_EMBEDDING_MODEL", "bge-m3")
+        return RemoteApiEmbeddingProvider(
+            model_name=target_model,
+            dimensions=dims if dimensions or os.getenv("RAG_EMBEDDING_DIMS") else 1024,
+        )
+    if prov in {"google", "gemini"}:
         target_model = model_name or os.getenv("RAG_EMBEDDING_MODEL", "models/text-embedding-004")
         return GoogleEmbeddingProvider(
             model_name=target_model,
             dimensions=dims,
         )
-    elif prov == "fake":
+    if prov == "fake":
         return DeterministicFakeEmbeddingProvider(dimensions=dims)
-    else:
-        raise ValueError(
-            f"Unknown embedding provider '{prov}'. Supported providers are: ['feature_hash', 'ollama', 'google', 'fake']"
-        )
+    raise ValueError(
+        f"Unknown embedding provider '{prov}'. Supported providers are: "
+        "['feature_hash', 'ollama', 'remote_api', 'google', 'fake']"
+    )
 
 
-# Backward-compatible global constants & functions
 EMBEDDING_DIMS: Final[int] = int(os.getenv("RAG_EMBEDDING_DIMS", "256"))
 STOPWORDS: Final[set[str]] = {
     "the", "and", "for", "with", "that", "this", "from", "are", "was", "were",
@@ -402,5 +532,11 @@ class CrossLingualEmbedder:
     def dimensions(self) -> int:
         return self._provider.dimensions
 
+    @property
+    def manifest(self) -> EmbeddingManifest:
+        return self._provider.manifest
+
     def embed(self, text: str) -> List[float]:
-        return self._provider.embed_query(text)
+        vector = self._provider.embed_query(text)
+        assert_vector_matches_manifest(vector, self._provider.manifest)
+        return vector

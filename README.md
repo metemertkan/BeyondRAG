@@ -122,7 +122,43 @@ pytest tests/ -v
 
 ---
 
+## Episode 2 — Production Document Ingestion (feature branch)
+
+**Branch:** `cursor/episode-2-ingestion-b42f` (checkout this branch to run Episode 2 locally).  
+**What shipped notes:** [`WHAT_SHIPPED.md`](./WHAT_SHIPPED.md)
+
+Episode 2 adds trustworthy ingestion on top of Episode 1 RBAC + cross-lingual retrieval:
+
+1. **Soft versioning:** stable `source_key` (`{tenant}:{filename}`) + per-bytes `doc_id` / content hash. Revised bytes mark the prior version `SUPERSEDED` (retained, excluded from retrieval).
+2. **Layout-aware PDF parsing:** primary adapter **pdfplumber** (tables as markdown rows, multi-column reading order). Offline Docker fallback: **PyPDF**. Structured fixtures under `tests/fixtures/pdfs/`.
+3. **Embedding contract at ingest:** Ollama `bge-m3`, OpenAI-compatible remote API (`RAG_EMBEDDING_API_KEY`), and deterministic `feature_hash` for CI. Manifest mismatch fails fast.
+4. **Durable registry:** `workspace/document_registry.json`.
+5. **Uploads:** `.pdf`, `.md`, `.txt` via `/api/upload`. Excel deferred; parser registry stays pluggable.
+6. **Languages:** config/data-driven packs (`workspace/language_packs.json`); EN/ZH are default data, not hardcoded product limits.
+
+### Demo path (sandbox)
+
+```bash
+git checkout cursor/episode-2-ingestion-b42f
+docker compose up -d --build
+# UI: http://localhost:8090
+pytest tests/ -v
+```
+
+Suggested walkthrough: ingest `tests/fixtures/pdfs/policy_v1_liquidity_table.pdf` with tag `finance` → retry same bytes → compare flat PyPDF vs pdfplumber cell retention → ingest `policy_v2_liquidity_table.pdf` with the same `source_key` → confirm v1 `SUPERSEDED` / search shows `HKD 520,000,000` only → optional ZH finance query under bge-m3 → force manifest mismatch to observe fail-fast.
+
+### Parser trade-offs (short)
+
+| Option | Why / why not |
+| --- | --- |
+| **pdfplumber (primary)** | MIT-friendly, table + layout extraction, modest image size, offline once installed |
+| **PyPDF (fallback)** | Tiny; keeps Docker boot working if pdfplumber is unavailable; flattens tables |
+| Docling | Strong fidelity but heavier ML/image deps — deferred for sandbox size |
+| PyMuPDF | Capable/fast; AGPL licensing friction for some deployments — deferred |
+
+---
+
 ## *Beyond a PoC* Series Roadmap
 
 - [x] **Episode #01 (`BeyondRAG`):** Access Management (RBAC Pre-Filtering) & Dynamic LLM Cross-Language (`ZH ↔ EN`) Retrieval in Elasticsearch 8.15
-- [ ] **Episode #02 (Up Next):** Deep Dive into Production Document Ingestion & Multilingual Dense Embeddings (`bge-m3`, Layout-Aware Parsing & Tables)
+- [ ] **Episode #02 (In progress on `cursor/episode-2-ingestion-b42f`):** Production document ingestion — soft supersession, layout-aware parsing & tables, `bge-m3` embedding contract

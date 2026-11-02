@@ -61,10 +61,13 @@ def _wire_default_components(
     from src.rag.es_client import ElasticsearchIndexManager
     from src.rag.extractor import DocumentParserRegistry
     from src.rag.ingestor import PdfIngestor
-    from src.rag.repository import DocumentRepository
+    from src.rag.repository import DEFAULT_REGISTRY_PATH, DocumentRepository
     from src.rag.retriever import HybridRetriever
     from src.rag.seeding import DemoDocumentSeeder
     from src.rag.synthesizer import GroundedAnswerSynthesizer
+    from src.rag.language_packs import get_language_pack_registry
+
+    get_language_pack_registry().ensure_workspace_defaults()
 
     es_manager = ElasticsearchIndexManager(
         es_url=es_url or ELASTICSEARCH_URL,
@@ -74,7 +77,11 @@ def _wire_default_components(
     chunker = create_chunker()
     cross_lingual = DefaultCrossLingualAdapter()
     embedder = CrossLingualEmbedder()
-    repository = DocumentRepository(es_manager=es_manager)
+    repository = DocumentRepository(
+        es_manager=es_manager,
+        registry_path=DEFAULT_REGISTRY_PATH,
+        persist_registry=True,
+    )
     ingestor = PdfIngestor(
         extractor=extractor,
         chunker=chunker,
@@ -182,12 +189,16 @@ class RBACKnowledgeBaseService:
         pdf_bytes: bytes,
         tags: List[str] | str | None = None,
         doc_id: str | None = None,
+        tenant: str | None = None,
+        source_key: str | None = None,
     ) -> Dict[str, Any]:
         return self._ingestor.ingest(
             filename=filename,
             pdf_bytes=pdf_bytes,
             tags=tags,
             doc_id=doc_id,
+            tenant=tenant,
+            source_key=source_key,
         )
 
     def list_documents(self) -> List[Dict[str, Any]]:
