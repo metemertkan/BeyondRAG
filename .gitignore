@@ -7,7 +7,11 @@ venv/
 .env
 
 # Workspace runtime uploads (keep directory structure via .gitkeep)
-workspace/uploads/*.pdf
+workspace/uploads/*
+!workspace/uploads/.gitkeep
+workspace/document_registry.json
+workspace/document_registry.tmp
+workspace/language_packs.json
 !workspace/.gitkeep
 
 # IDE & OS
