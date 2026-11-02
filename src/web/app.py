@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -15,6 +17,11 @@ from src.rag.service import KB_INDEX_NAME, get_kb_service, normalize_tags
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
+# Demo UI chrome (html lang, placeholders, quick prompts) — runtime config, not HTML hardcode.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+UI_DEMO_CONFIG_PATH = Path(
+    os.environ.get("RAG_UI_DEMO_CONFIG", str(_REPO_ROOT / "config" / "ui_demo.json"))
+)
 
 app = FastAPI(
     title="HK-FDE RBAC RAG Knowledge Base",
@@ -71,6 +78,26 @@ async def serve_dashboard() -> FileResponse:
     if not index_path.exists():
         raise HTTPException(status_code=404, detail="Dashboard HTML not found.")
     return FileResponse(index_path)
+
+
+@app.get("/api/ui-demo-config")
+async def ui_demo_config() -> Dict[str, Any]:
+    """Return dashboard demo chrome from config/ui_demo.json (overridable via RAG_UI_DEMO_CONFIG)."""
+    path = UI_DEMO_CONFIG_PATH
+    if not path.exists():
+        return {
+            "html_lang": "",
+            "chat_placeholder": "Ask the knowledge base…",
+            "demo_prompts": [],
+        }
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=500, detail="ui_demo.json must be a JSON object")
+    return {
+        "html_lang": str(raw.get("html_lang") or ""),
+        "chat_placeholder": str(raw.get("chat_placeholder") or ""),
+        "demo_prompts": list(raw.get("demo_prompts") or []),
+    }
 
 
 @app.get("/api/health")

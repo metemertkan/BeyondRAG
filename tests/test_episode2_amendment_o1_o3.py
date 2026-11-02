@@ -129,16 +129,12 @@ def test_ja_only_pack_runtime_drives_detection_and_prompts():
     assert "Japanese" in user
 
 
-# Allowlisted pack/config data modules (language codes may appear as DATA here only).
-_LANG_HARDCODE_ALLOWLIST = frozenset(
-    {
-        "language_packs.py",
-    }
-)
+# ISO-ish codes that must not appear as product mapping tables in src/.
+_LANG_CODE = r"(?:en|zh|ja|ko|fr|es|de|ru|ar|tr|nl|pt|it|vi|th|hi|id)"
 
 _FORBIDDEN_LANG_HARDCODE = re.compile(
-    r"""
-    priority\s*=\s*\[[^\]]*(?:["']ja["']|["']zh["']|["']en["'])  # detector lists
+    rf"""
+    priority\s*=\s*\[[^\]]*["']{_LANG_CODE}["']
     |Extract\s+bilingual\s+EN\s*<[-=>]+\s*ZH
     |_matches_zh_triggers
     |zh_triggers
@@ -146,37 +142,166 @@ _FORBIDDEN_LANG_HARDCODE = re.compile(
     |Traditional\s+Chinese
     |ZH\s*→\s*EN
     |EN\s*<->\s*ZH
-    |["']en["']\s*,\s*["']zh["']
-    |["']zh["']\s*,\s*["']en["']
     |\bor\s+["']en["']
     |startswith\(\s*["']en["']\s*\)
+    |_BUILTIN_DEFAULT_PACKS
+    |\[\s*["']{_LANG_CODE}["']\s*,\s*["']{_LANG_CODE}["']
+    |["']{_LANG_CODE}["']\s*:\s*["'](?:{_LANG_CODE}|[a-z_]*triggers)["']
     """,
     re.VERBOSE,
 )
 
+_FORBIDDEN_HTML_JS = re.compile(
+    r"""
+    <html[^>]*\slang\s*=\s*["'][A-Za-z-]{2,}["']   # hardcoded document lang
+    |runQuickPrompt\s*\(\s*['\"][^'\"]{4,}          # inline demo prompt strings
+    |八號風球|最低港元現金儲備|葵青貨櫃碼頭             # known demo fixture copy in product HTML
+    |Chinese\s*/\s*English
+    |ask\s+in\s+Chinese
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+
+def _scan_src_for_language_hardcodes() -> List[str]:
+    """Return offender strings ``relpath:line:snippet`` for Mete no-hardcode rule."""
+    src_root = SRC_RAG.parent  # src/
+    offenders: List[str] = []
+    for path in src_root.rglob("*"):
+        if "__pycache__" in path.parts or not path.is_file():
+            continue
+        if path.suffix.lower() not in {".py", ".html", ".js", ".css"}:
+            continue
+        # No allowlist — language_packs.py loader must also stay free of pack dicts.
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        patterns = [_FORBIDDEN_LANG_HARDCODE]
+        if path.suffix.lower() in {".html", ".js"}:
+            patterns.append(_FORBIDDEN_HTML_JS)
+        for pattern in patterns:
+            match = pattern.search(text)
+            if match:
+                line_no = text[: match.start()].count("\n") + 1
+                rel = path.relative_to(src_root.parent)
+                offenders.append(f"{rel}:{line_no}:{match.group(0)[:48].replace(chr(10), ' ')}")
+                break
+    return offenders
+
 
 @pytest.mark.ep2
 def test_src_has_no_hardcoded_language_codes_or_maps():
-    """Guard: language codes / pair maps / trigger field names must not hardcode in src/.
+    """Guard: language codes / pair maps / HTML lang+prompts must not hardcode in src/.
 
-    Allowlist: pack/config data modules only. Behavioural coverage is separate
-    (JA-only runtime pack + concept_trigger_field tests).
+    Pack + UI demo data live in config/*.json. No Python allowlist (incl. language_packs.py).
     """
-    src_root = SRC_RAG.parent  # src/
-    offenders: List[str] = []
-    for path in src_root.rglob("*.py"):
-        if path.name in _LANG_HARDCODE_ALLOWLIST:
-            continue
-        # Skip __pycache__
-        if "__pycache__" in path.parts:
-            continue
-        text = path.read_text(encoding="utf-8")
-        match = _FORBIDDEN_LANG_HARDCODE.search(text)
-        if match:
-            # Find line number for claim-matrix reporting.
-            line_no = text[: match.start()].count("\n") + 1
-            offenders.append(f"{path.relative_to(src_root.parent)}:{line_no}:{match.group(0)[:40]}")
+    offenders = _scan_src_for_language_hardcodes()
     assert offenders == [], "hardcoded language/mapping leftovers:\n" + "\n".join(offenders)
+
+
+@pytest.mark.ep2
+def test_language_hardcode_guard_fails_on_planted_violation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Negative self-test: guard must FAIL when a language-code list is planted under src/."""
+    planted = SRC_RAG / "_guard_plant_language_map.py"
+    planted.write_text(
+        'SUPPORTED_LANGS = ["ja", "ko", "ru", "ar", "zh"]\n'
+        'PAIR_MAP = {"zh": "en", "ja": "en"}\n',
+        encoding="utf-8",
+    )
+    try:
+        offenders = _scan_src_for_language_hardcodes()
+        assert any("_guard_plant_language_map.py" in o for o in offenders), offenders
+        assert any("ja" in o and "ko" in o or "zh" in o for o in offenders), offenders
+    finally:
+        planted.unlink(missing_ok=True)
+    # Clean tree must still be green after removal.
+    assert _scan_src_for_language_hardcodes() == []
+
+
+@pytest.mark.ep2
+def test_language_packs_load_from_config_json_not_python_dicts():
+    """Defaults must come from config/language_packs.defaults.json at runtime."""
+    from src.rag.language_packs import BUNDLED_DEFAULTS_PATH, LanguagePackRegistry
+
+    assert BUNDLED_DEFAULTS_PATH.exists(), BUNDLED_DEFAULTS_PATH
+    assert BUNDLED_DEFAULTS_PATH.suffix == ".json"
+    # Loader module must not embed builtins pack dicts / language lists.
+    loader_src = (SRC_RAG / "language_packs.py").read_text(encoding="utf-8")
+    assert "_BUILTIN_DEFAULT_PACKS" not in loader_src
+    assert not re.search(r'["\']packs["\']\s*:\s*\{', loader_src)
+    assert not re.search(
+        r'detection_priority["\']?\s*:\s*\[["\']ja["\']',
+        loader_src,
+    )
+
+    packs = LanguagePackRegistry(packs_path=BUNDLED_DEFAULTS_PATH)
+    assert packs.get("ja") is not None
+    assert "ja_triggers" in packs.trigger_fields()
+
+
+@pytest.mark.ep2
+def test_ui_demo_prompts_come_from_config_not_html():
+    """Demo prompts / html lang live in config/ui_demo.json — not hardcoded in index.html."""
+    html = (Path(__file__).resolve().parents[1] / "src" / "web" / "static" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    assert "八號風球" not in html
+    assert "runQuickPrompt('" not in html
+    assert not re.search(r'<html[^>]*\slang\s*=\s*["\'][A-Za-z]{2,}["\']', html, re.I)
+    assert "/api/ui-demo-config" in html
+    cfg_path = Path(__file__).resolve().parents[1] / "config" / "ui_demo.json"
+    assert cfg_path.exists()
+    import json
+
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert cfg.get("demo_prompts"), "ui_demo.json must list demo prompts"
+    assert any("八號風球" in str(p.get("query", "")) for p in cfg["demo_prompts"])
+    assert str(cfg.get("html_lang") or "").strip()
+
+
+@pytest.mark.ep2
+def test_default_packs_detect_japanese_before_chinese_han_overlap():
+    """O1a: default/bundled packs + detection_priority must not let zh Han range eat kana."""
+    from src.rag.cross_lingual import RuleBasedLanguageDetector
+    from src.rag.language_packs import BUNDLED_DEFAULTS_PATH, LanguagePackRegistry
+
+    packs = LanguagePackRegistry(packs_path=BUNDLED_DEFAULTS_PATH)
+    assert packs.detection_priority[0] == "ja"
+    # Stale workspace shape (no priority, zh before ja) must still inherit bundled priority.
+    stale = {
+        "corpus_language": "en",
+        "packs": {
+            "zh": {
+                "language_code": "zh",
+                "display_name": "Chinese",
+                "script_patterns": [r"[\u4e00-\uffff]"],
+                "concept_trigger_field": "zh_triggers",
+            },
+            "ja": {
+                "language_code": "ja",
+                "display_name": "Japanese",
+                "script_patterns": [r"[\u3040-\u30ff]"],
+                "concept_trigger_field": "ja_triggers",
+            },
+            "en": {
+                "language_code": "en",
+                "display_name": "English",
+                "script_patterns": [],
+                "concept_trigger_field": "en_triggers",
+            },
+        },
+    }
+    # Simulate incomplete workspace file load path.
+    import src.rag.language_packs as lp
+
+    merged = lp._inherit_missing_detection_fields(stale, lp.DEFAULT_PACKS_PATH)
+    assert merged["detection_priority"][0] == "ja"
+    reg = LanguagePackRegistry(raw=merged)
+    det = RuleBasedLanguageDetector(reg)
+    assert det.detect("台風第8号の警報が出ました") == "ja"
+    assert det.detect("流動性カバレッジ比率の下限は？") == "ja"
+    assert det.detect("香港天文台八號風球警告") == "zh"
 
 
 @pytest.mark.ep2

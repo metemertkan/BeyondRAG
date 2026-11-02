@@ -1,15 +1,16 @@
 """Config/data-driven language packs for multilingual retrieval.
 
 Episode 2 rule: no hardcoded product languages in orchestration code.
-EN and ZH ship as the default pack data; additional languages are added by
-loading another JSON pack (or extending ``workspace/language_packs.json``).
-Detection priority, concept-trigger field names, and extraction prompts live
-here (or in the JSON override) — not in ``cross_lingual.py``.
+Default packs ship as runtime-loaded JSON under ``config/language_packs.defaults.json``
+(workspace override: ``workspace/language_packs.json`` or ``RAG_LANGUAGE_PACKS_PATH``).
+Detection priority, concept-trigger field names, and extraction prompts live in
+those data files — not as Python dicts here.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -18,110 +19,66 @@ from typing import Any, Dict, Final, List, Optional
 
 from src.config import WORKSPACE_DIR
 
+logger = logging.getLogger(__name__)
+
+# Repo-root defaults file (checked into git). Workspace override is preferred when present.
+_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
+BUNDLED_DEFAULTS_PATH: Final[Path] = _REPO_ROOT / "config" / "language_packs.defaults.json"
 DEFAULT_PACKS_PATH: Final[Path] = WORKSPACE_DIR / "language_packs.json"
 
-# Built-in seed data. Not imported as constants into detectors — loaded through
-# LanguagePackRegistry so tests can swap packs (including removing EN/ZH).
-_DEFAULT_CONCEPT_EXTRACTION: Final[Dict[str, Any]] = {
-    "system_prompt": (
-        "Extract multilingual search concepts as compact JSON. "
-        "Use the trigger field names supplied in the user prompt for each language."
-    ),
-    "user_prompt_template": (
-        "Document: {filename}\n"
-        "Text:\n{text}\n\n"
-        "Extract 3 distinct domain concepts from the text so users can search this document using "
-        "any of the configured languages ({language_names}).\n"
-        "Return ONLY JSON:\n"
-        '{{"concepts": [{{"concept_id": "concept:unique_name", {trigger_schema}, '
-        '"en_expansion": "english keywords"}}]}}'
-    ),
-    "expansion_field": "en_expansion",
-}
 
-_BUILTIN_DEFAULT_PACKS: Final[Dict[str, Any]] = {
-    "corpus_language": "en",
-    # Script-first order so Han-overlap languages (JA before ZH) win on mixed CJK.
-    "detection_priority": ["ja", "ko", "ru", "ar", "zh", "fr", "es", "de", "tr"],
-    "concept_extraction": dict(_DEFAULT_CONCEPT_EXTRACTION),
-    "packs": {
-        "en": {
-            "language_code": "en",
-            "display_name": "English",
-            "script_patterns": [],
-            "marker_words": [],
-            "concept_trigger_field": "en_triggers",
-        },
-        "zh": {
-            "language_code": "zh",
-            "display_name": "Chinese",
-            "script_patterns": [r"[\u4e00-\uffff]"],
-            "marker_words": [],
-            "concept_trigger_field": "zh_triggers",
-            "generic_bigrams": [
-                "政策", "規定", "规定", "什麼", "什么", "請問", "请问", "公司", "香港",
-                "要求", "多少", "時間", "时间", "工作", "管理", "系統", "系统",
-                "標準", "标准", "部門", "部门",
-            ],
-        },
-        "ja": {
-            "language_code": "ja",
-            "display_name": "Japanese",
-            "script_patterns": [r"[\u3040-\u30ff]"],
-            "marker_words": [],
-            "concept_trigger_field": "ja_triggers",
-        },
-        "ko": {
-            "language_code": "ko",
-            "display_name": "Korean",
-            "script_patterns": [r"[\uac00-\ud7af]"],
-            "marker_words": [],
-            "concept_trigger_field": "ko_triggers",
-        },
-        "fr": {
-            "language_code": "fr",
-            "display_name": "French",
-            "script_patterns": [],
-            "marker_words": ["quelle", "quel", "est", "du", "des", "dans", "avec", "télétravail"],
-            "concept_trigger_field": "fr_triggers",
-        },
-        "es": {
-            "language_code": "es",
-            "display_name": "Spanish",
-            "script_patterns": [],
-            "marker_words": ["cuál", "el", "los", "las", "por", "para", "cómo"],
-            "concept_trigger_field": "es_triggers",
-        },
-        "de": {
-            "language_code": "de",
-            "display_name": "German",
-            "script_patterns": [],
-            "marker_words": ["der", "die", "das", "und", "nicht", "mit", "wie"],
-            "concept_trigger_field": "de_triggers",
-        },
-        "ru": {
-            "language_code": "ru",
-            "display_name": "Russian",
-            "script_patterns": [r"[\u0400-\u04ff]"],
-            "marker_words": [],
-            "concept_trigger_field": "ru_triggers",
-        },
-        "ar": {
-            "language_code": "ar",
-            "display_name": "Arabic",
-            "script_patterns": [r"[\u0600-\u06ff]"],
-            "marker_words": [],
-            "concept_trigger_field": "ar_triggers",
-        },
-        "tr": {
-            "language_code": "tr",
-            "display_name": "Turkish",
-            "script_patterns": [],
-            "marker_words": ["nedir", "nasıl", "için", "veya", "değil", "politikası", "nakit"],
-            "concept_trigger_field": "tr_triggers",
-        },
-    },
-}
+def _load_json_payload(path: Path) -> Dict[str, Any]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError(f"Language pack file must be a JSON object: {path}")
+    return raw
+
+
+def resolve_language_packs_path(
+    packs_path: Optional[Path] = None,
+) -> Path:
+    """Prefer explicit path → env → workspace override → bundled config defaults."""
+    if packs_path is not None:
+        return Path(packs_path)
+    env = os.getenv("RAG_LANGUAGE_PACKS_PATH", "").strip()
+    if env:
+        return Path(env)
+    if DEFAULT_PACKS_PATH.exists():
+        return DEFAULT_PACKS_PATH
+    return BUNDLED_DEFAULTS_PATH
+
+
+def _inherit_missing_detection_fields(
+    payload: Dict[str, Any],
+    loaded_from: Path,
+) -> Dict[str, Any]:
+    """If a workspace override omits detection_priority, inherit from bundled defaults.
+
+    Tester failure mode: stale workspace/language_packs.json without detection_priority
+    used pack insertion order (zh before ja) while zh Han range matched mixed JP text.
+    """
+    priority = payload.get("detection_priority")
+    if isinstance(priority, list) and priority:
+        return payload
+    if not BUNDLED_DEFAULTS_PATH.exists():
+        return payload
+    if loaded_from.resolve() == BUNDLED_DEFAULTS_PATH.resolve():
+        return payload
+    try:
+        bundled = _load_json_payload(BUNDLED_DEFAULTS_PATH)
+    except Exception:
+        return payload
+    bundled_priority = bundled.get("detection_priority")
+    if not (isinstance(bundled_priority, list) and bundled_priority):
+        return payload
+    merged = dict(payload)
+    merged["detection_priority"] = list(bundled_priority)
+    logger.info(
+        "Inherited detection_priority from %s into incomplete pack file %s",
+        BUNDLED_DEFAULTS_PATH,
+        loaded_from,
+    )
+    return merged
 
 
 @dataclass(frozen=True)
@@ -140,36 +97,40 @@ class LanguagePack:
 
 
 class LanguagePackRegistry:
-    """Loads language packs from JSON (workspace override or built-in defaults)."""
+    """Loads language packs from JSON (workspace override or bundled config defaults)."""
 
     def __init__(
         self,
         packs_path: Optional[Path] = None,
         raw: Optional[Dict[str, Any]] = None,
     ) -> None:
-        self.packs_path = packs_path or Path(
-            os.getenv("RAG_LANGUAGE_PACKS_PATH", str(DEFAULT_PACKS_PATH))
-        )
+        self.packs_path = resolve_language_packs_path(packs_path)
         if raw is not None:
             payload = raw
-        elif self.packs_path.exists():
-            payload = json.loads(self.packs_path.read_text(encoding="utf-8"))
         else:
-            payload = _BUILTIN_DEFAULT_PACKS
+            if not self.packs_path.exists():
+                raise FileNotFoundError(
+                    f"Language pack config not found at {self.packs_path}. "
+                    "Ship config/language_packs.defaults.json or set RAG_LANGUAGE_PACKS_PATH."
+                )
+            payload = _load_json_payload(self.packs_path)
+            # Incomplete workspace overrides (missing detection_priority) inherit from bundled JSON.
+            payload = _inherit_missing_detection_fields(payload, self.packs_path)
 
         self._packs: Dict[str, LanguagePack] = {}
         for code, entry in (payload.get("packs") or {}).items():
             if not isinstance(entry, dict):
                 continue
             lang = str(entry.get("language_code") or code).strip().lower()
+            trigger_field = str(entry.get("concept_trigger_field") or "").strip()
+            if not trigger_field:
+                trigger_field = f"{lang}_triggers"
             self._packs[lang] = LanguagePack(
                 language_code=lang,
                 display_name=str(entry.get("display_name") or lang),
                 script_patterns=[str(p) for p in entry.get("script_patterns") or []],
                 marker_words=[str(w).lower() for w in entry.get("marker_words") or []],
-                concept_trigger_field=str(
-                    entry.get("concept_trigger_field") or f"{lang}_triggers"
-                ),
+                concept_trigger_field=trigger_field,
                 generic_bigrams=[str(b) for b in entry.get("generic_bigrams") or []],
             )
 
@@ -190,18 +151,15 @@ class LanguagePackRegistry:
                 str(c).strip().lower() for c in configured_priority if str(c).strip()
             ]
         else:
-            # Fall back to pack insertion order excluding corpus language.
+            # No hardcoded product order — insertion order excluding corpus only.
             self.detection_priority = [
                 c for c in self._packs.keys() if c != self.corpus_language
             ]
 
         extraction = payload.get("concept_extraction")
-        if isinstance(extraction, dict) and extraction:
-            merged = dict(_DEFAULT_CONCEPT_EXTRACTION)
-            merged.update(extraction)
-            self.concept_extraction: Dict[str, Any] = merged
-        else:
-            self.concept_extraction = dict(_DEFAULT_CONCEPT_EXTRACTION)
+        self.concept_extraction: Dict[str, Any] = (
+            dict(extraction) if isinstance(extraction, dict) else {}
+        )
 
     @property
     def supported_languages(self) -> List[str]:
@@ -244,15 +202,15 @@ class LanguagePackRegistry:
         filename: str,
         text: str,
     ) -> tuple[str, str]:
-        """Build system + user prompts from pack config (no EN/ZH literals in callers)."""
-        system = str(
-            self.concept_extraction.get("system_prompt")
-            or _DEFAULT_CONCEPT_EXTRACTION["system_prompt"]
-        )
-        template = str(
-            self.concept_extraction.get("user_prompt_template")
-            or _DEFAULT_CONCEPT_EXTRACTION["user_prompt_template"]
-        )
+        """Build system + user prompts from pack config JSON."""
+        system = str(self.concept_extraction.get("system_prompt") or "").strip()
+        template = str(self.concept_extraction.get("user_prompt_template") or "").strip()
+        if not template:
+            template = (
+                "Document: {filename}\nText:\n{text}\n\n"
+                "Extract domain concepts for languages ({language_names}). "
+                "Return ONLY JSON with fields: {trigger_schema}."
+            )
         names = ", ".join(
             (self.get(c).display_name if self.get(c) else c)
             for c in self.supported_languages
@@ -269,20 +227,51 @@ class LanguagePackRegistry:
         return system, user
 
     def expansion_field(self) -> str:
-        return str(
-            self.concept_extraction.get("expansion_field")
-            or _DEFAULT_CONCEPT_EXTRACTION["expansion_field"]
-        )
+        configured = str(self.concept_extraction.get("expansion_field") or "").strip()
+        return configured or "expansion"
 
     def ensure_workspace_defaults(self) -> Path:
-        """Write default packs to workspace if missing (demo / local runs)."""
-        if not self.packs_path.exists():
-            self.packs_path.parent.mkdir(parents=True, exist_ok=True)
-            self.packs_path.write_text(
-                json.dumps(_BUILTIN_DEFAULT_PACKS, ensure_ascii=False, indent=2),
-                encoding="utf-8",
+        """Ensure workspace override exists and has detection_priority from bundled JSON."""
+        target = DEFAULT_PACKS_PATH
+        source = BUNDLED_DEFAULTS_PATH
+        if not source.exists():
+            raise FileNotFoundError(
+                f"Bundled language pack defaults missing: {source}"
             )
-        return self.packs_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            logger.info("Wrote workspace language packs from %s", source)
+            return target
+
+        try:
+            current = _load_json_payload(target)
+        except Exception:
+            target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            logger.warning("Replaced unreadable workspace language packs from %s", source)
+            return target
+
+        priority = current.get("detection_priority")
+        if isinstance(priority, list) and priority:
+            return target
+
+        bundled = _load_json_payload(source)
+        current["detection_priority"] = list(bundled.get("detection_priority") or [])
+        # Keep Han-only zh scripts from bundled when present (avoid stale broad ranges).
+        bundled_zh = (bundled.get("packs") or {}).get("zh") or {}
+        if isinstance(bundled_zh, dict) and bundled_zh.get("script_patterns"):
+            packs = current.setdefault("packs", {})
+            if isinstance(packs, dict) and isinstance(packs.get("zh"), dict):
+                packs["zh"]["script_patterns"] = list(bundled_zh["script_patterns"])
+        target.write_text(
+            json.dumps(current, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        logger.info(
+            "Upgraded workspace language packs detection_priority from %s",
+            source,
+        )
+        return target
 
 
 _PACK_REGISTRY: LanguagePackRegistry | None = None

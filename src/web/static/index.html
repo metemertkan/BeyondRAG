@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -441,18 +441,16 @@
             <option value="llm">Grounded LLM (Ollama)</option>
           </select>
         </div>
-        <div class="row">
+        <div class="row" id="demoPromptsRow">
           <span class="prompt-label">Demo Prompts</span>
-          <button type="button" onclick="runQuickPrompt('八號風球及混合辦公考勤政策是什麼？')" class="prompt-btn">[Public] 八號風球考勤</button>
-          <button type="button" onclick="runQuickPrompt('最低港元現金儲備緩衝是多少？外匯遠期合約限額是多少？')" class="prompt-btn">[Finance] 最低港元現金儲備</button>
-          <button type="button" onclick="runQuickPrompt('葵青貨櫃碼頭的準時調度SLA和冷鏈溫度是多少？')" class="prompt-btn">[Operation] 葵青碼頭SLA</button>
+          <!-- Populated at runtime from /api/ui-demo-config (config/ui_demo.json). -->
         </div>
       </div>
 
       <div id="chatMessages"></div>
 
       <form onsubmit="handleChatSubmit(event)" class="chat-form">
-        <input id="chatInput" type="text" placeholder="Click a query above or ask in any supported language..." class="text-input" />
+        <input id="chatInput" type="text" placeholder="" class="text-input" />
         <button id="chatSendBtn" type="submit" class="btn btn-primary">Ask KB</button>
       </form>
     </section>
@@ -486,6 +484,7 @@
         if (saved === 'dark' || saved === 'light') theme = saved;
       } catch (_) {}
       applyTheme(theme);
+      await loadUiDemoConfig();
       renderUploadTagPills();
       updateUploadAccessPreview();
       await fetchDocumentsAndTags();
@@ -667,6 +666,32 @@
       const input = document.getElementById('chatInput');
       input.value = text;
       handleChatSubmit(new Event('submit'));
+    }
+
+    async function loadUiDemoConfig() {
+      try {
+        const resp = await fetch('/api/ui-demo-config');
+        if (!resp.ok) return;
+        const cfg = await resp.json();
+        if (cfg.html_lang) document.documentElement.lang = String(cfg.html_lang);
+        const input = document.getElementById('chatInput');
+        if (input && cfg.chat_placeholder) input.placeholder = String(cfg.chat_placeholder);
+        const row = document.getElementById('demoPromptsRow');
+        if (!row || !Array.isArray(cfg.demo_prompts)) return;
+        for (const item of cfg.demo_prompts) {
+          const query = String((item && item.query) || '');
+          const label = String((item && item.label) || query);
+          if (!query) continue;
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'prompt-btn';
+          btn.textContent = label;
+          btn.addEventListener('click', () => runQuickPrompt(query));
+          row.appendChild(btn);
+        }
+      } catch (_) {
+        /* demo chrome is optional — chat still works without it */
+      }
     }
 
     async function handleChatSubmit(event) {

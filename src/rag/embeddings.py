@@ -504,7 +504,11 @@ STOPWORDS: Final[set[str]] = {
 
 
 def has_cjk(text: str) -> bool:
-    """Return True if the string contains CJK characters."""
+    """True if text contains codepoints in the CJK Unified Ideographs Unicode range.
+
+    This is a script-range / tokenization helper only — not a product language gate
+    and not tied to any configured language pack code (zh/ja/…).
+    """
     return bool(_CJK_CHAR_RE.search(text))
 
 

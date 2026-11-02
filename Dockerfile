@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf 
 
 COPY pyproject.toml README.md ./
 COPY src ./src
+COPY config ./config
 COPY web_server.py benchmark_rbac.py ./
 RUN mkdir -p /app/workspace/uploads
 

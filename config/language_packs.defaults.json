@@ -1,0 +1,157 @@
+{
+  "corpus_language": "en",
+  "detection_priority": [
+    "ja",
+    "ko",
+    "ru",
+    "ar",
+    "zh",
+    "fr",
+    "es",
+    "de",
+    "tr"
+  ],
+  "concept_extraction": {
+    "system_prompt": "Extract multilingual search concepts as compact JSON. Use the trigger field names supplied in the user prompt for each language.",
+    "user_prompt_template": "Document: {filename}\nText:\n{text}\n\nExtract 3 distinct domain concepts from the text so users can search this document using any of the configured languages ({language_names}).\nReturn ONLY JSON:\n{{\"concepts\": [{{\"concept_id\": \"concept:unique_name\", {trigger_schema}, \"en_expansion\": \"english keywords\"}}]}}",
+    "expansion_field": "en_expansion"
+  },
+  "packs": {
+    "en": {
+      "language_code": "en",
+      "display_name": "English",
+      "script_patterns": [],
+      "marker_words": [],
+      "concept_trigger_field": "en_triggers"
+    },
+    "zh": {
+      "language_code": "zh",
+      "display_name": "Chinese",
+      "script_patterns": [
+        "[\\u4e00-\\u9fff]"
+      ],
+      "marker_words": [],
+      "concept_trigger_field": "zh_triggers",
+      "generic_bigrams": [
+        "政策",
+        "規定",
+        "规定",
+        "什麼",
+        "什么",
+        "請問",
+        "请问",
+        "公司",
+        "香港",
+        "要求",
+        "多少",
+        "時間",
+        "时间",
+        "工作",
+        "管理",
+        "系統",
+        "系统",
+        "標準",
+        "标准",
+        "部門",
+        "部门"
+      ]
+    },
+    "ja": {
+      "language_code": "ja",
+      "display_name": "Japanese",
+      "script_patterns": [
+        "[\\u3040-\\u30ff]"
+      ],
+      "marker_words": [],
+      "concept_trigger_field": "ja_triggers"
+    },
+    "ko": {
+      "language_code": "ko",
+      "display_name": "Korean",
+      "script_patterns": [
+        "[\\uac00-\\ud7af]"
+      ],
+      "marker_words": [],
+      "concept_trigger_field": "ko_triggers"
+    },
+    "fr": {
+      "language_code": "fr",
+      "display_name": "French",
+      "script_patterns": [],
+      "marker_words": [
+        "quelle",
+        "quel",
+        "est",
+        "du",
+        "des",
+        "dans",
+        "avec",
+        "télétravail"
+      ],
+      "concept_trigger_field": "fr_triggers"
+    },
+    "es": {
+      "language_code": "es",
+      "display_name": "Spanish",
+      "script_patterns": [],
+      "marker_words": [
+        "cuál",
+        "el",
+        "los",
+        "las",
+        "por",
+        "para",
+        "cómo"
+      ],
+      "concept_trigger_field": "es_triggers"
+    },
+    "de": {
+      "language_code": "de",
+      "display_name": "German",
+      "script_patterns": [],
+      "marker_words": [
+        "der",
+        "die",
+        "das",
+        "und",
+        "nicht",
+        "mit",
+        "wie"
+      ],
+      "concept_trigger_field": "de_triggers"
+    },
+    "ru": {
+      "language_code": "ru",
+      "display_name": "Russian",
+      "script_patterns": [
+        "[\\u0400-\\u04ff]"
+      ],
+      "marker_words": [],
+      "concept_trigger_field": "ru_triggers"
+    },
+    "ar": {
+      "language_code": "ar",
+      "display_name": "Arabic",
+      "script_patterns": [
+        "[\\u0600-\\u06ff]"
+      ],
+      "marker_words": [],
+      "concept_trigger_field": "ar_triggers"
+    },
+    "tr": {
+      "language_code": "tr",
+      "display_name": "Turkish",
+      "script_patterns": [],
+      "marker_words": [
+        "nedir",
+        "nasıl",
+        "için",
+        "veya",
+        "değil",
+        "politikası",
+        "nakit"
+      ],
+      "concept_trigger_field": "tr_triggers"
+    }
+  }
+}

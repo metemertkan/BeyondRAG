@@ -20,7 +20,7 @@
 | Manifest mismatch fails fast at ingest | `PdfIngestor(expected_manifest=...)` + index manifest lock; `test_embedding_manifest_mismatch_fails_fast_at_ingest` |
 | PENDING recorded before PROCESSING | `PdfIngestor.ingest`; `test_pending_state_actually_used_or_documented` |
 | Tenant/scope in identity | `source_key = {tenant}:{filename}`; non-default tenant also prefixes `doc_id`. Default tenant keeps Ep1 `doc-{stem}-{12hex}` shape. |
-| Languages fully config/data-driven (no EN/ZH hardcode in orchestration) | `src/rag/language_packs.py` + `workspace/language_packs.json` (`detection_priority`, `concept_extraction`, `concept_trigger_field`); `cross_lingual.py` pack-driven; tests in `tests/test_episode2_amendment_o1_o3.py` (JA-only runtime, trigger-field wiring, src/ hardcode guard) |
+| Languages fully config/data-driven (no EN/ZH hardcode in orchestration) | Runtime JSON only: `config/language_packs.defaults.json` (+ workspace override). Loader `src/rag/language_packs.py` has no pack dicts. UI demo prompts/lang from `config/ui_demo.json` via `/api/ui-demo-config`. Tests in `tests/test_episode2_amendment_o1_o3.py`. |
 | Explicit PDF parser degraded policy | `RAG_PARSER_ALLOW_DEGRADED`; registry records `parser_name` / `parser_degraded` / reason; same-bytes refuses flat overwrite of pdfplumber INDEXED |
 | Stage-then-publish supersede | `DocumentRepository.publish_new_current`; v2 staged then INDEXED before v1→SUPERSEDED; exactly one current; v2 fail leaves v1 |
 | Upload accepts PDF + Markdown + txt | `/api/upload` in `src/web/app.py` (`.pdf`, `.md`, `.txt`). Excel **not** this episode; registry remains pluggable (`ExcelDocumentParser` stub / `register`). |

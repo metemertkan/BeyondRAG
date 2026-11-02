@@ -1,0 +1,18 @@
+{
+  "html_lang": "en",
+  "chat_placeholder": "Click a query above or ask in any supported language...",
+  "demo_prompts": [
+    {
+      "label": "[Public] 八號風球考勤",
+      "query": "八號風球及混合辦公考勤政策是什麼？"
+    },
+    {
+      "label": "[Finance] 最低港元現金儲備",
+      "query": "最低港元現金儲備緩衝是多少？外匯遠期合約限額是多少？"
+    },
+    {
+      "label": "[Operation] 葵青碼頭SLA",
+      "query": "葵青貨櫃碼頭的準時調度SLA和冷鏈溫度是多少？"
+    }
+  ]
+}
