@@ -1,0 +1,20 @@
+/* BeyondRAG design tokens: Paper & Ink (light) + Soft Night (dark) */
+:root {
+  --br-bg: #F5F1E8;        --br-surface: #EDE7DA;
+  --br-ink: #1E1C19;       --br-ink-2: #6E685E;     --br-hair: #D8D0C1;
+  --br-fail: #B8432F;      --br-fix: #2E6B57;       /* the only two accents */
+  --br-fail-tint: #B8432F1F; --br-fix-tint: #2E6B571F;
+  --br-font-head: "Newsreader", Georgia, serif;
+  --br-font-body: "Source Sans 3", system-ui, sans-serif;
+  --br-font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --br-radius: 3px;  --br-stroke: 1.5px;  --br-hairline: 1px;  --br-dash: 4 3;
+  --br-space: 8px;   /* multiples only: 8 16 24 40 64 */
+  --br-ease: cubic-bezier(.2, 0, 0, 1);
+  --br-dur-enter: 400ms;  --br-dur-emphasis: 250ms;  --br-dim: 0.3;
+}
+[data-theme="dark"] {
+  --br-bg: #17191C;  --br-surface: #202327;
+  --br-ink: #E8E6E1; --br-ink-2: #9A9C9F; --br-hair: #33373C;
+  --br-fail: #E0835F; --br-fix: #8CC5A8;
+  --br-fail-tint: #E0835F24; --br-fix-tint: #8CC5A824;
+}

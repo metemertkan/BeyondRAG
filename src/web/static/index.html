@@ -1,212 +1,459 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BeyondRAG | Enterprise RBAC &amp; Cross-Lingual RAG</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
-            mono: ['"JetBrains Mono"', 'monospace'],
-          },
-          colors: {
-            ctp: {
-              rosewater: '#f5e0dc',
-              flamingo: '#f2cdcd',
-              pink: '#f5c2e7',
-              mauve: '#cba6f7',
-              red: '#f38ba8',
-              maroon: '#eba0ac',
-              peach: '#fab387',
-              yellow: '#f9e2af',
-              green: '#a6e3a1',
-              teal: '#94e2d5',
-              sky: '#89dceb',
-              sapphire: '#74c7ec',
-              blue: '#89b4fa',
-              lavender: '#b4befe',
-              text: '#cdd6f4',
-              subtext1: '#bac2de',
-              subtext0: '#a6adc8',
-              overlay2: '#9399b2',
-              overlay1: '#7f849c',
-              overlay0: '#6c7086',
-              surface2: '#585b70',
-              surface1: '#45475a',
-              surface0: '#313244',
-              base: '#1e1e2e',
-              mantle: '#181825',
-              crust: '#11111b',
-            }
-          }
-        }
-      }
-    };
-  </script>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,600;6..72,700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/tokens.css" />
   <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      background: var(--br-bg);
+      color: var(--br-ink);
+      font-family: var(--br-font-body);
+      font-size: 15px;
+      line-height: 1.5;
+      display: flex;
+      flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+    }
+    ::selection { background: var(--br-fix-tint); color: var(--br-ink); }
     ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #11111b; }
-    ::-webkit-scrollbar-thumb { background: #45475a; border-radius: 4px; }
-    ::-webkit-scrollbar-thumb:hover { background: #585b70; }
+    ::-webkit-scrollbar-track { background: var(--br-bg); }
+    ::-webkit-scrollbar-thumb { background: var(--br-hair); border-radius: var(--br-radius); }
+    ::-webkit-scrollbar-thumb:hover { background: var(--br-ink-2); }
+
+    h1, h2 { font-family: var(--br-font-head); font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+    button, input, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    code, .mono { font-family: var(--br-font-mono); }
+
+    .app-header {
+      border-bottom: var(--br-hairline) solid var(--br-hair);
+      background: var(--br-bg);
+      position: sticky;
+      top: 0;
+      z-index: 30;
+    }
+    .header-inner {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 16px 24px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand-mark {
+      width: 40px; height: 40px;
+      border: var(--br-stroke) solid var(--br-ink);
+      border-radius: var(--br-radius);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--br-font-head);
+      font-weight: 700;
+      font-size: 15px;
+      background: var(--br-surface);
+      flex-shrink: 0;
+    }
+    .brand-title { font-family: var(--br-font-head); font-size: 1.25rem; font-weight: 700; line-height: 1.2; }
+    .brand-sub { margin: 2px 0 0; font-size: 0.8125rem; color: var(--br-ink-2); }
+    .header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+    .role-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--br-surface);
+      border: var(--br-hairline) solid var(--br-hair);
+      border-radius: var(--br-radius);
+    }
+    .role-label { font-size: 0.8125rem; color: var(--br-ink-2); margin-right: 4px; }
+
+    .btn {
+      border: var(--br-hairline) solid var(--br-hair);
+      background: var(--br-bg);
+      color: var(--br-ink-2);
+      border-radius: var(--br-radius);
+      padding: 8px 14px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      transition: border-color var(--br-dur-emphasis) var(--br-ease),
+                  color var(--br-dur-emphasis) var(--br-ease),
+                  background var(--br-dur-emphasis) var(--br-ease);
+    }
+    .btn:hover { border-color: var(--br-ink-2); color: var(--br-ink); }
+    .btn-active {
+      background: var(--br-ink);
+      border-color: var(--br-ink);
+      color: var(--br-bg);
+    }
+    .btn-primary {
+      background: var(--br-ink);
+      border-color: var(--br-ink);
+      color: var(--br-bg);
+      font-weight: 600;
+    }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-theme {
+      padding: 8px 12px;
+      font-family: var(--br-font-mono);
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+
+    .layout {
+      max-width: 1400px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 24px;
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+    @media (min-width: 1024px) {
+      .layout { grid-template-columns: 5fr 7fr; }
+    }
+
+    .panel {
+      background: var(--br-surface);
+      border: var(--br-hairline) solid var(--br-hair);
+      border-radius: var(--br-radius);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .panel-chat {
+      padding: 0;
+      overflow: hidden;
+      min-height: 640px;
+      gap: 0;
+    }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .panel-title {
+      font-family: var(--br-font-head);
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: var(--br-ink);
+    }
+    .section-label { font-size: 0.8125rem; color: var(--br-ink-2); font-weight: 600; }
+
+    .upload-box {
+      background: var(--br-bg);
+      border: var(--br-hairline) solid var(--br-hair);
+      border-radius: var(--br-radius);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .drop-zone {
+      border: var(--br-hairline) dashed var(--br-hair);
+      border-radius: var(--br-radius);
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      cursor: pointer;
+      transition: border-color var(--br-dur-emphasis) var(--br-ease);
+    }
+    .drop-zone:hover { border-color: var(--br-ink-2); }
+    .drop-label { font-size: 0.875rem; font-weight: 500; color: var(--br-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .drop-browse {
+      padding: 4px 10px;
+      border: var(--br-hairline) solid var(--br-hair);
+      border-radius: var(--br-radius);
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--br-ink-2);
+      background: var(--br-surface);
+      flex-shrink: 0;
+    }
+    .field-label { display: block; font-size: 0.8125rem; font-weight: 600; color: var(--br-ink-2); margin-bottom: 8px; }
+    .field-hint { font-weight: 400; color: var(--br-ink-2); opacity: 0.85; }
+    .text-input, .select-input {
+      width: 100%;
+      background: var(--br-bg);
+      border: var(--br-hairline) solid var(--br-hair);
+      border-radius: var(--br-radius);
+      padding: 8px 12px;
+      font-size: 0.875rem;
+      color: var(--br-ink);
+      outline: none;
+      transition: border-color var(--br-dur-emphasis) var(--br-ease);
+    }
+    .text-input:focus, .select-input:focus { border-color: var(--br-ink-2); }
+    .text-input.mono { font-family: var(--br-font-mono); font-size: 0.8125rem; }
+    .text-input::placeholder { color: var(--br-ink-2); opacity: 0.7; }
+    .select-input { width: auto; font-family: var(--br-font-mono); font-size: 0.75rem; color: var(--br-ink-2); }
+
+    .row-between { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .status-msg { font-size: 0.8125rem; font-weight: 500; color: var(--br-ink-2); min-height: 0; }
+    .status-msg:empty { display: none; }
+    .status-ok { color: var(--br-fix); font-weight: 600; }
+    .status-err { color: var(--br-fail); font-weight: 600; }
+    .status-busy { color: var(--br-ink-2); }
+
+    .kb-list { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .kb-list-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; gap: 8px; }
+    .role-banner { font-size: 0.75rem; font-family: var(--br-font-mono); color: var(--br-ink-2); }
+    #documentsList { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding-right: 4px; }
+
+    .doc-row {
+      padding: 12px 16px;
+      border: var(--br-hairline) solid var(--br-hair);
+      border-radius: var(--br-radius);
+      background: var(--br-bg);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      transition: border-color var(--br-dur-emphasis) var(--br-ease);
+    }
+    .doc-row:hover { border-color: var(--br-ink-2); }
+    .doc-row.is-locked { opacity: 0.6; }
+    .doc-row.is-superseded { opacity: var(--br-dim); }
+    .doc-row.is-superseded:hover { border-color: var(--br-hair); }
+    .doc-main { min-width: 0; flex: 1; }
+    .doc-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .doc-name { font-size: 0.875rem; font-weight: 700; color: var(--br-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .doc-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+    .doc-source { margin-top: 4px; font-size: 0.6875rem; font-family: var(--br-font-mono); color: var(--br-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .doc-ver { font-size: 0.6875rem; font-family: var(--br-font-mono); color: var(--br-ink-2); }
+
+    .label {
+      display: inline-block;
+      padding: 2px 8px;
+      border: var(--br-hairline) solid var(--br-hair);
+      border-radius: var(--br-radius);
+      font-size: 0.75rem;
+      font-family: var(--br-font-mono);
+      font-weight: 500;
+      color: var(--br-ink-2);
+      background: transparent;
+      line-height: 1.4;
+    }
+    .label-ink { color: var(--br-ink); border-color: var(--br-ink-2); }
+    .label-fix { color: var(--br-fix); border-color: var(--br-fix); background: var(--br-fix-tint); }
+    .label-fail { color: var(--br-fail); border-color: var(--br-fail); background: var(--br-fail-tint); }
+    .lifecycle-plain {
+      font-size: 0.6875rem;
+      font-family: var(--br-font-mono);
+      font-weight: 500;
+      color: var(--br-ink-2);
+      letter-spacing: 0.02em;
+    }
+    .access-pill { flex-shrink: 0; font-size: 0.75rem; font-family: var(--br-font-mono); font-weight: 600; padding: 4px 10px; border-radius: var(--br-radius); border: var(--br-hairline) solid; }
+    .access-ok { color: var(--br-fix); border-color: var(--br-fix); background: var(--br-fix-tint); }
+    .access-locked { color: var(--br-fail); border-color: var(--br-fail); background: var(--br-fail-tint); }
+
+    .tag-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border: var(--br-hairline) solid var(--br-hair);
+      border-radius: var(--br-radius);
+      background: var(--br-bg);
+      color: var(--br-ink-2);
+      font-size: 0.875rem;
+      font-weight: 600;
+      transition: border-color var(--br-dur-emphasis) var(--br-ease), color var(--br-dur-emphasis) var(--br-ease), background var(--br-dur-emphasis) var(--br-ease);
+    }
+    .tag-btn:hover { border-color: var(--br-ink-2); color: var(--br-ink); }
+    .tag-btn.is-active { background: var(--br-ink); border-color: var(--br-ink); color: var(--br-bg); }
+
+    .access-preview { font-size: 0.75rem; font-family: var(--br-font-mono); font-weight: 500; padding: 4px 10px; border-radius: var(--br-radius); border: var(--br-hairline) solid var(--br-hair); color: var(--br-ink-2); }
+    .access-preview.is-public { color: var(--br-fix); border-color: var(--br-fix); background: var(--br-fix-tint); }
+    .access-preview.is-tagged { color: var(--br-ink); border-color: var(--br-ink-2); }
+
+    .chat-top {
+      padding: 16px;
+      border-bottom: var(--br-hairline) solid var(--br-hair);
+      background: var(--br-bg);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .prompt-label { font-size: 0.8125rem; font-weight: 600; color: var(--br-ink-2); margin-right: 4px; }
+    .prompt-btn {
+      padding: 6px 12px;
+      border: var(--br-hairline) solid var(--br-hair);
+      border-radius: var(--br-radius);
+      background: var(--br-surface);
+      color: var(--br-ink);
+      font-size: 0.75rem;
+      font-weight: 600;
+      transition: border-color var(--br-dur-emphasis) var(--br-ease);
+    }
+    .prompt-btn:hover { border-color: var(--br-ink-2); }
+
+    #chatMessages {
+      flex: 1;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+      background: var(--br-surface);
+    }
+    .msg-user { display: flex; justify-content: flex-end; }
+    .msg-user-bubble {
+      max-width: 90%;
+      background: var(--br-bg);
+      border: var(--br-hairline) solid var(--br-hair);
+      border-radius: var(--br-radius);
+      padding: 10px 16px;
+      font-size: 0.875rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .msg-user-bubble .q { font-weight: 600; }
+    .msg-assistant {
+      border: var(--br-stroke) solid var(--br-hair);
+      border-radius: var(--br-radius);
+      padding: 16px;
+      background: var(--br-bg);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .msg-assistant.is-ok { border-color: var(--br-fix); }
+    .msg-assistant.is-blocked { border-color: var(--br-fail); background: var(--br-fail-tint); }
+    .msg-body { font-size: 0.875rem; line-height: 1.6; color: var(--br-ink); }
+    .msg-body strong { font-weight: 700; color: var(--br-ink); }
+    .msg-body em { color: var(--br-ink-2); }
+    .msg-body code {
+      padding: 2px 6px;
+      border-radius: var(--br-radius);
+      background: var(--br-surface);
+      border: var(--br-hairline) solid var(--br-hair);
+      font-family: var(--br-font-mono);
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--br-ink);
+    }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 4px; }
+    .meta-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+    .chat-form {
+      padding: 16px;
+      border-top: var(--br-hairline) solid var(--br-hair);
+      background: var(--br-bg);
+      display: flex;
+      gap: 8px;
+    }
+    .chat-form .text-input { flex: 1; padding: 10px 16px; }
+
+    .file-selected { color: var(--br-fix); font-weight: 700; }
   </style>
 </head>
-<body class="bg-ctp-crust text-ctp-text min-h-screen flex flex-col font-sans antialiased selection:bg-ctp-mauve selection:text-ctp-crust">
-
-  <!-- Catppuccin Mocha Sleek Top Bar -->
-  <header class="border-b border-ctp-surface0 bg-ctp-mantle/95 backdrop-blur sticky top-0 z-30 shadow-md shadow-ctp-crust/50">
-    <div class="max-w-[1400px] mx-auto px-5 py-3 flex flex-wrap items-center justify-between gap-3">
-      <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-ctp-mauve via-ctp-lavender to-ctp-blue flex items-center justify-center font-black text-ctp-crust text-base shadow-lg shadow-ctp-mauve/25">
-          BR
-        </div>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">BR</div>
         <div>
-          <div class="flex items-center gap-2">
-            <h1 class="text-lg font-extrabold tracking-tight text-ctp-text">BeyondRAG</h1>
-            <span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-ctp-mauve/15 text-ctp-mauve border border-ctp-mauve/30">
-              Catppuccin Mocha
-            </span>
-          </div>
-          <p class="text-xs text-ctp-subtext0">Enterprise RBAC &amp; Cross-Lingual Knowledge Base</p>
+          <div class="brand-title">BeyondRAG</div>
+          <p class="brand-sub">Enterprise RBAC &amp; Cross-Lingual Knowledge Base</p>
         </div>
       </div>
 
-      <!-- Active Role Switcher -->
-      <div class="flex flex-wrap items-center gap-2 bg-ctp-base border border-ctp-surface0 rounded-xl px-3.5 py-1.5 shadow-inner">
-        <span class="text-xs font-bold uppercase tracking-wider text-ctp-subtext0 mr-1 flex items-center gap-1.5">
-          <span class="w-2 h-2 rounded-full bg-ctp-lavender animate-pulse"></span>
-          Role:
-        </span>
-        <button onclick="setRolePreset([])" id="presetPublicBtn" class="px-3.5 py-1.5 rounded-lg text-sm font-bold transition border">
-          Public Only
-        </button>
-        <button onclick="setRolePreset(['finance'])" id="presetFinanceBtn" class="px-3.5 py-1.5 rounded-lg text-sm font-bold transition border">
-          Finance Role
-        </button>
-        <button onclick="setRolePreset(['operation'])" id="presetOperationBtn" class="px-3.5 py-1.5 rounded-lg text-sm font-bold transition border">
-          Operation Role
-        </button>
-        <button onclick="setRolePreset(['finance', 'operation'])" id="presetAllBtn" class="px-3.5 py-1.5 rounded-lg text-sm font-bold transition border">
-          All Roles
-        </button>
+      <div class="header-actions">
+        <div class="role-bar">
+          <span class="role-label">Role</span>
+          <button type="button" onclick="setRolePreset([])" id="presetPublicBtn" class="btn">Public Only</button>
+          <button type="button" onclick="setRolePreset(['finance'])" id="presetFinanceBtn" class="btn">Finance Role</button>
+          <button type="button" onclick="setRolePreset(['operation'])" id="presetOperationBtn" class="btn">Operation Role</button>
+          <button type="button" onclick="setRolePreset(['finance', 'operation'])" id="presetAllBtn" class="btn">All Roles</button>
+        </div>
+        <button type="button" id="themeToggleBtn" class="btn btn-theme" onclick="toggleTheme()" aria-label="Toggle theme">Dark</button>
       </div>
     </div>
   </header>
 
-  <!-- Main 2-Section Layout: (1) PDF Upload & Knowledge Base + (2) Multi-Lingual Chat -->
-  <main class="max-w-[1400px] w-full mx-auto px-5 py-5 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5">
-
-    <!-- SECTION 1: PDF UPLOAD & KNOWLEDGE BASE LIST (5 cols) -->
-    <section class="lg:col-span-5 bg-ctp-mantle/90 border border-ctp-surface0 rounded-2xl p-5 shadow-xl flex flex-col gap-4">
-      <div class="flex items-center justify-between">
-        <h2 class="text-base font-extrabold text-ctp-text uppercase tracking-wider flex items-center gap-2.5">
-          <span class="w-3 h-3 rounded-full bg-ctp-lavender shadow-sm shadow-ctp-lavender/50"></span>
-          1. Document Upload &amp; Knowledge Base
-        </h2>
-        <span id="uploadAccessPreview" class="px-3 py-1 rounded-full text-xs font-bold font-mono"></span>
+  <main class="layout">
+    <section class="panel">
+      <div class="panel-head">
+        <h2 class="panel-title">1. Document Upload &amp; Knowledge Base</h2>
+        <span id="uploadAccessPreview" class="access-preview"></span>
       </div>
 
-      <!-- Compact Upload & Tag Bar -->
-      <div class="bg-ctp-base border border-ctp-surface0 rounded-xl p-4 space-y-3.5 shadow-sm">
-        <div id="dropZone"
-             onclick="document.getElementById('pdfFileInput').click()"
-             class="border border-dashed border-ctp-surface1 hover:border-ctp-lavender rounded-lg px-3.5 py-3 text-center cursor-pointer transition bg-ctp-mantle/60 flex items-center justify-between gap-2 group">
-          <input type="file" id="pdfFileInput" accept=".pdf,.md,.markdown,.txt,application/pdf,text/markdown,text/plain" class="hidden" onchange="handleFileSelect(event)" />
-          <span id="selectedFileLabel" class="text-sm font-semibold text-ctp-text truncate group-hover:text-ctp-lavender transition">
-            📄 Select PDF / Markdown / TXT
-          </span>
-          <span class="px-2.5 py-1 rounded bg-ctp-surface0 text-xs font-bold text-ctp-subtext1 group-hover:bg-ctp-lavender group-hover:text-ctp-crust transition shrink-0">Browse</span>
+      <div class="upload-box">
+        <div id="dropZone" class="drop-zone" onclick="document.getElementById('pdfFileInput').click()">
+          <input type="file" id="pdfFileInput" accept=".pdf,.md,.markdown,.txt,application/pdf,text/markdown,text/plain" class="hidden" style="display:none" onchange="handleFileSelect(event)" />
+          <span id="selectedFileLabel" class="drop-label">Select PDF / Markdown / TXT</span>
+          <span class="drop-browse">Browse</span>
         </div>
 
-        <div class="flex flex-col gap-2">
-          <label class="text-xs font-bold text-ctp-subtext0" for="sourceKeyInput">
-            source_key <span class="font-normal text-ctp-overlay1">(optional — same key supersedes prior version)</span>
+        <div>
+          <label class="field-label" for="sourceKeyInput">
+            source_key <span class="field-hint">(optional — same key supersedes prior version)</span>
           </label>
-          <input id="sourceKeyInput" type="text" placeholder="e.g. hk-treasury-fx-liquidity-q4"
-                 class="w-full bg-ctp-mantle border border-ctp-surface0 rounded-lg px-3 py-2 text-sm font-mono text-ctp-text placeholder-ctp-overlay0 focus:outline-none focus:border-ctp-lavender" />
+          <input id="sourceKeyInput" type="text" placeholder="e.g. hk-treasury-fx-liquidity-q4" class="text-input mono" />
         </div>
 
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-xs font-bold text-ctp-subtext0">RBAC Tag:</span>
-            <div id="uploadTagPills" class="flex flex-wrap gap-2"></div>
+        <div class="row-between">
+          <div class="row">
+            <span class="section-label">RBAC Tag</span>
+            <div id="uploadTagPills" class="row"></div>
           </div>
-
-          <button id="uploadSubmitBtn"
-                  onclick="submitPdfUpload()"
-                  class="px-4 py-2 rounded-lg bg-ctp-lavender hover:bg-ctp-blue text-sm font-black text-ctp-crust shadow-md shadow-ctp-lavender/20 transition active:scale-95">
-            Upload &amp; Index
-          </button>
+          <button id="uploadSubmitBtn" type="button" onclick="submitPdfUpload()" class="btn btn-primary">Upload &amp; Index</button>
         </div>
-        <div id="uploadStatusMsg" class="text-xs font-semibold text-ctp-subtext1 empty:hidden"></div>
+        <div id="uploadStatusMsg" class="status-msg"></div>
       </div>
 
-      <!-- Knowledge Base Uploaded Documents List -->
-      <div class="flex-1 flex flex-col min-h-0">
-        <div class="flex items-center justify-between mb-2.5">
-          <span class="text-xs font-extrabold uppercase tracking-wider text-ctp-subtext0">
-            Knowledge Base (incl. SUPERSEDED)
-          </span>
-          <span id="chatRoleBanner" class="text-xs font-bold font-mono text-ctp-sapphire"></span>
+      <div class="kb-list">
+        <div class="kb-list-head">
+          <span class="section-label">Knowledge Base (incl. SUPERSEDED)</span>
+          <span id="chatRoleBanner" class="role-banner"></span>
         </div>
-        <div id="documentsList" class="space-y-2.5 overflow-y-auto pr-1"></div>
+        <div id="documentsList"></div>
       </div>
     </section>
 
-    <!-- SECTION 2: MULTI-LINGUAL RBAC CHAT (7 cols) -->
-    <section class="lg:col-span-7 bg-ctp-mantle/90 border border-ctp-surface0 rounded-2xl shadow-xl flex flex-col overflow-hidden min-h-[640px]">
-
-      <!-- Pre-Generated Multi-Lingual Query Chips -->
-      <div class="p-4 border-b border-ctp-surface0 bg-ctp-base/70 space-y-3">
-        <div class="flex items-center justify-between">
-          <h2 class="text-base font-extrabold text-ctp-text uppercase tracking-wider flex items-center gap-2.5">
-            <span class="w-3 h-3 rounded-full bg-ctp-sapphire shadow-sm shadow-ctp-sapphire/50"></span>
-            2. Multi-Lingual RBAC Chat
-          </h2>
-          <select id="synthesisModeSelect" class="bg-ctp-mantle border border-ctp-surface0 text-ctp-subtext0 text-xs rounded-lg px-2.5 py-1 font-mono focus:border-ctp-lavender">
+    <section class="panel panel-chat">
+      <div class="chat-top">
+        <div class="panel-head">
+          <h2 class="panel-title">2. Multi-Lingual RBAC Chat</h2>
+          <select id="synthesisModeSelect" class="select-input">
             <option value="fast">Instant Citation</option>
             <option value="llm">Grounded LLM (Ollama)</option>
           </select>
         </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="text-xs font-extrabold text-ctp-sapphire mr-1">Demo Prompts:</span>
-          <button onclick="runQuickPrompt('八號風球及混合辦公考勤政策是什麼？')"
-                  class="px-3 py-1.5 rounded-lg bg-ctp-green/15 hover:bg-ctp-green/25 border border-ctp-green/30 text-xs font-bold text-ctp-green transition active:scale-95">
-            [Public 公開] 八號風球考勤
-          </button>
-          <button onclick="runQuickPrompt('最低港元現金儲備緩衝是多少？外匯遠期合約限額是多少？')"
-                  class="px-3 py-1.5 rounded-lg bg-ctp-mauve/15 hover:bg-ctp-mauve/25 border border-ctp-mauve/30 text-xs font-bold text-ctp-mauve transition active:scale-95">
-            [Finance 財務] 最低港元現金儲備
-          </button>
-          <button onclick="runQuickPrompt('葵青貨櫃碼頭的準時調度SLA和冷鏈溫度是多少？')"
-                  class="px-3 py-1.5 rounded-lg bg-ctp-peach/15 hover:bg-ctp-peach/25 border border-ctp-peach/30 text-xs font-bold text-ctp-peach transition active:scale-95">
-            [Operation 營運] 葵青碼頭SLA
-          </button>
+        <div class="row">
+          <span class="prompt-label">Demo Prompts</span>
+          <button type="button" onclick="runQuickPrompt('八號風球及混合辦公考勤政策是什麼？')" class="prompt-btn">[Public] 八號風球考勤</button>
+          <button type="button" onclick="runQuickPrompt('最低港元現金儲備緩衝是多少？外匯遠期合約限額是多少？')" class="prompt-btn">[Finance] 最低港元現金儲備</button>
+          <button type="button" onclick="runQuickPrompt('葵青貨櫃碼頭的準時調度SLA和冷鏈溫度是多少？')" class="prompt-btn">[Operation] 葵青碼頭SLA</button>
         </div>
       </div>
 
-      <!-- Clean Chat Stream -->
-      <div id="chatMessages" class="flex-1 p-5 space-y-3.5 overflow-y-auto"></div>
+      <div id="chatMessages"></div>
 
-      <!-- Chat Input -->
-      <form onsubmit="handleChatSubmit(event)" class="p-4 border-t border-ctp-surface0 bg-ctp-base/80 flex gap-2.5">
-        <input id="chatInput"
-               type="text"
-               placeholder="Click a query above or ask in Chinese / English / Dutch..."
-               class="flex-1 bg-ctp-crust border border-ctp-surface0 rounded-xl px-4 py-2.5 text-sm font-medium text-ctp-text placeholder-ctp-overlay0 focus:outline-none focus:border-ctp-lavender transition" />
-        <button id="chatSendBtn"
-                type="submit"
-                class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-ctp-mauve via-ctp-lavender to-ctp-blue hover:opacity-90 text-sm font-black text-ctp-crust shadow-lg shadow-ctp-mauve/20 transition active:scale-95">
-          Ask KB
-        </button>
+      <form onsubmit="handleChatSubmit(event)" class="chat-form">
+        <input id="chatInput" type="text" placeholder="Click a query above or ask in Chinese / English / Dutch..." class="text-input" />
+        <button id="chatSendBtn" type="submit" class="btn btn-primary">Ask KB</button>
       </form>
     </section>
   </main>
@@ -218,7 +465,27 @@
     let documents = [];
     let selectedPdfFile = null;
 
+    function applyTheme(theme) {
+      const root = document.documentElement;
+      if (theme === 'dark') root.setAttribute('data-theme', 'dark');
+      else root.removeAttribute('data-theme');
+      const btn = document.getElementById('themeToggleBtn');
+      if (btn) btn.textContent = theme === 'dark' ? 'Light' : 'Dark';
+      try { localStorage.setItem('br-theme', theme); } catch (_) {}
+    }
+
+    function toggleTheme() {
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      applyTheme(isDark ? 'light' : 'dark');
+    }
+
     window.addEventListener('DOMContentLoaded', async () => {
+      let theme = 'light';
+      try {
+        const saved = localStorage.getItem('br-theme');
+        if (saved === 'dark' || saved === 'light') theme = saved;
+      } catch (_) {}
+      applyTheme(theme);
       renderUploadTagPills();
       updateUploadAccessPreview();
       await fetchDocumentsAndTags();
@@ -230,7 +497,7 @@
       if (files && files.length > 0) {
         selectedPdfFile = files[0];
         document.getElementById('selectedFileLabel').innerHTML =
-          `📄 <span class="text-ctp-green font-extrabold">${escapeHtml(selectedPdfFile.name)}</span>`;
+          `<span class="file-selected">${escapeHtml(selectedPdfFile.name)}</span>`;
       }
     }
 
@@ -245,14 +512,10 @@
       const container = document.getElementById('uploadTagPills');
       container.innerHTML = availableTags.map(tag => {
         const active = selectedUploadTags.has(tag);
-        const activeClass = tag === 'finance'
-          ? 'bg-ctp-mauve text-ctp-crust border-ctp-mauve shadow-sm'
-          : 'bg-ctp-peach text-ctp-crust border-ctp-peach shadow-sm';
-        const inactiveClass = 'bg-ctp-base text-ctp-subtext0 border-ctp-surface0 hover:border-ctp-surface1 hover:text-ctp-text';
         return `
           <button type="button"
                   onclick="toggleUploadTag('${escapeHtml(tag)}')"
-                  class="px-3 py-1.5 rounded-lg text-sm font-bold border transition flex items-center gap-1.5 ${active ? activeClass : inactiveClass}">
+                  class="tag-btn${active ? ' is-active' : ''}">
             <span>${active ? '✓' : '+'}</span>
             <span>${escapeHtml(tag)}</span>
           </button>
@@ -264,10 +527,10 @@
       const badge = document.getElementById('uploadAccessPreview');
       const tags = Array.from(selectedUploadTags);
       if (tags.length === 0) {
-        badge.className = 'px-3 py-1 rounded-full text-xs font-bold font-mono bg-ctp-green/15 text-ctp-green border border-ctp-green/30';
+        badge.className = 'access-preview is-public';
         badge.textContent = 'PUBLIC';
       } else {
-        badge.className = 'px-3 py-1 rounded-full text-xs font-bold font-mono bg-ctp-mauve/20 text-ctp-mauve border border-ctp-mauve/40';
+        badge.className = 'access-preview is-tagged';
         badge.textContent = `Tag: ${tags.join(', ')}`;
       }
     }
@@ -287,9 +550,7 @@
 
       const setBtnStyle = (id, active) => {
         const el = document.getElementById(id);
-        el.className = active
-          ? 'px-3.5 py-1.5 rounded-lg text-sm font-extrabold transition border bg-ctp-lavender/25 border-ctp-lavender text-ctp-lavender shadow-sm'
-          : 'px-3.5 py-1.5 rounded-lg text-sm font-semibold transition border bg-ctp-base border-ctp-surface0 text-ctp-subtext0 hover:text-ctp-text hover:border-ctp-surface1';
+        el.className = active ? 'btn btn-active' : 'btn';
       };
       setBtnStyle('presetPublicBtn', isPublicOnly);
       setBtnStyle('presetFinanceBtn', isFinOnly);
@@ -317,7 +578,7 @@
       if (!selectedPdfFile) return;
 
       btn.disabled = true;
-      statusEl.innerHTML = `<span class="text-ctp-sapphire animate-pulse">⏳ Indexing & extracting concepts...</span>`;
+      statusEl.innerHTML = `<span class="status-busy">Indexing &amp; extracting concepts...</span>`;
       try {
         const formData = new FormData();
         formData.append('file', selectedPdfFile);
@@ -329,12 +590,13 @@
         if (!resp.ok) throw new Error(data.detail || 'Upload failed');
         const st = escapeHtml(data.document.status || 'INDEXED');
         const sk = data.document.source_key ? ` · source_key=${escapeHtml(data.document.source_key)}` : '';
-        statusEl.innerHTML = `<span class="text-ctp-green font-bold">✓ ${escapeHtml(data.document.filename)} → ${st}${sk}</span>`;
+        statusEl.innerHTML = `<span class="status-ok">${escapeHtml(data.document.filename)} → ${st}${sk}</span>`;
         selectedPdfFile = null;
         document.getElementById('pdfFileInput').value = '';
+        document.getElementById('selectedFileLabel').textContent = 'Select PDF / Markdown / TXT';
         await fetchDocumentsAndTags();
       } catch (err) {
-        statusEl.innerHTML = `<span class="text-ctp-red font-bold">${escapeHtml(err.message)}</span>`;
+        statusEl.innerHTML = `<span class="status-err">${escapeHtml(err.message)}</span>`;
       } finally {
         btn.disabled = false;
       }
@@ -347,15 +609,17 @@
 
     function lifecycleBadge(status) {
       const s = String(status || 'INDEXED').toUpperCase();
-      const styles = {
-        PENDING: 'bg-ctp-yellow/20 text-ctp-yellow border-ctp-yellow/40',
-        PROCESSING: 'bg-ctp-sapphire/20 text-ctp-sapphire border-ctp-sapphire/40',
-        INDEXED: 'bg-ctp-green/20 text-ctp-green border-ctp-green/40',
-        SUPERSEDED: 'bg-ctp-overlay0/30 text-ctp-subtext0 border-ctp-overlay0/40',
-        FAILED: 'bg-ctp-red/20 text-ctp-red border-ctp-red/40',
-      };
-      const cls = styles[s] || styles.INDEXED;
-      return `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-extrabold border ${cls}">${escapeHtml(s)}</span>`;
+      if (s === 'INDEXED') {
+        return `<span class="label label-fix">${escapeHtml(s)}</span>`;
+      }
+      if (s === 'FAILED') {
+        return `<span class="label label-fail">${escapeHtml(s)}</span>`;
+      }
+      if (s === 'SUPERSEDED') {
+        return `<span class="lifecycle-plain">${escapeHtml(s)}</span>`;
+      }
+      // PENDING / PROCESSING — muted ink label, not a coloured chip
+      return `<span class="lifecycle-plain">${escapeHtml(s)}</span>`;
     }
 
     function renderDocumentsList() {
@@ -364,34 +628,33 @@
         const accessible = canCurrentUserAccessDoc(doc);
         const superseded = String(doc.status || '').toUpperCase() === 'SUPERSEDED' || doc.is_current === false;
         const accessPill = accessible
-          ? `<span class="px-2.5 py-1 rounded-lg text-xs font-extrabold font-mono bg-ctp-green/20 text-ctp-green border border-ctp-green/35 shrink-0">✓ Unlocked</span>`
-          : `<span class="px-2.5 py-1 rounded-lg text-xs font-extrabold font-mono bg-ctp-red/20 text-ctp-red border border-ctp-red/35 shrink-0">🔒 Locked</span>`;
+          ? `<span class="access-pill access-ok">Unlocked</span>`
+          : `<span class="access-pill access-locked">Locked</span>`;
 
         const tagPills = (doc.is_public || !doc.tags || doc.tags.length === 0)
-          ? `<span class="px-2 py-0.5 rounded text-xs font-mono font-bold bg-ctp-green/15 text-ctp-green border border-ctp-green/25">PUBLIC</span>`
-          : doc.tags.map(t => {
-              const colorClass = t === 'finance'
-                ? 'bg-ctp-mauve/20 text-ctp-mauve border-ctp-mauve/35'
-                : 'bg-ctp-peach/20 text-ctp-peach border-ctp-peach/35';
-              return `<span class="px-2 py-0.5 rounded text-xs font-mono font-bold border ${colorClass}">${escapeHtml(t)}</span>`;
-            }).join(' ');
+          ? `<span class="label label-fix">PUBLIC</span>`
+          : doc.tags.map(t => `<span class="label label-ink">${escapeHtml(t)}</span>`).join(' ');
 
         const sk = doc.source_key
-          ? `<div class="text-[10px] font-mono text-ctp-overlay1 truncate mt-1">source_key: ${escapeHtml(doc.source_key)}</div>`
+          ? `<div class="doc-source">source_key: ${escapeHtml(doc.source_key)}</div>`
           : '';
-        const ver = doc.doc_version ? `<span class="text-[10px] font-mono text-ctp-overlay1">v${escapeHtml(String(doc.doc_version))}</span>` : '';
+        const ver = doc.doc_version ? `<span class="doc-ver">v${escapeHtml(String(doc.doc_version))}</span>` : '';
+
+        const rowClass = [
+          'doc-row',
+          superseded ? 'is-superseded' : '',
+          !accessible && !superseded ? 'is-locked' : '',
+        ].filter(Boolean).join(' ');
 
         return `
-          <div class="px-4 py-3 rounded-xl border transition flex items-center justify-between gap-3 ${superseded ? 'bg-ctp-mantle/40 border-ctp-surface0/50 opacity-75' : accessible ? 'bg-ctp-base border-ctp-surface0 hover:border-ctp-surface1' : 'bg-ctp-mantle/60 border-ctp-surface0/60 opacity-60'}">
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2 flex-wrap">
-                <div class="text-sm font-extrabold text-ctp-text truncate">${escapeHtml(doc.filename)}</div>
+          <div class="${rowClass}">
+            <div class="doc-main">
+              <div class="doc-title-row">
+                <div class="doc-name">${escapeHtml(doc.filename)}</div>
                 ${lifecycleBadge(doc.status)}
                 ${ver}
               </div>
-              <div class="flex items-center gap-2 mt-1 flex-wrap">
-                ${tagPills}
-              </div>
+              <div class="doc-meta">${tagPills}</div>
               ${sk}
             </div>
             ${accessPill}
@@ -418,14 +681,14 @@
       const sendBtn = document.getElementById('chatSendBtn');
 
       const roleBadge = roles.length
-        ? roles.map(r => `<span class="px-2 py-0.5 rounded bg-ctp-mauve/30 text-ctp-mauve text-xs font-mono font-bold">${escapeHtml(r)}</span>`).join(' ')
-        : `<span class="px-2 py-0.5 rounded bg-ctp-green/25 text-ctp-green text-xs font-mono font-bold">public</span>`;
+        ? roles.map(r => `<span class="label label-ink">${escapeHtml(r)}</span>`).join(' ')
+        : `<span class="label label-fix">public</span>`;
 
       messagesContainer.insertAdjacentHTML('beforeend', `
-        <div class="flex justify-end">
-          <div class="max-w-[90%] bg-ctp-blue/20 border border-ctp-blue/40 rounded-2xl px-4 py-2.5 text-sm text-ctp-text flex items-center gap-2 shadow-sm">
+        <div class="msg-user">
+          <div class="msg-user-bubble">
             ${roleBadge}
-            <span class="font-bold">${escapeHtml(question)}</span>
+            <span class="q">${escapeHtml(question)}</span>
           </div>
         </div>
       `);
@@ -450,42 +713,42 @@
 
     function appendAssistantResponse(data) {
       const messagesContainer = document.getElementById('chatMessages');
-      const isBlocked = (data.answer || '').includes('🔒');
-      const cardBorder = isBlocked ? 'border-2 border-ctp-red/60 bg-ctp-red/10' : 'border-2 border-ctp-green/45 bg-ctp-base';
+      const isBlocked = (data.answer || '').includes('🔒') || (data.answer || '').toLowerCase().includes('access denied') || (data.answer || '').toLowerCase().includes('not authorized');
+      const cardClass = isBlocked ? 'msg-assistant is-blocked' : 'msg-assistant is-ok';
 
       let metaInfo = '';
       if (data.is_cross_lingual) {
-        metaInfo += `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-ctp-teal/20 text-ctp-teal border border-ctp-teal/35">🌐 Cross-Lingual (ZH→Doc)</span> `;
+        metaInfo += `<span class="label label-ink">Cross-Lingual</span> `;
       }
       if (data.latency_ms) {
-        metaInfo += `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-ctp-surface0 text-ctp-subtext0">${data.latency_ms} ms</span>`;
+        metaInfo += `<span class="label">${data.latency_ms} ms</span>`;
       }
 
       const chunkMeta = (data.authorized_chunks || [])
         .slice(0, 3)
         .map(c => {
-          const bt = c.block_type ? `<span class="text-ctp-peach">${escapeHtml(String(c.block_type))}</span>` : 'chunk';
+          const bt = c.block_type ? escapeHtml(String(c.block_type)) : 'chunk';
           const pg = c.page_number != null ? ` p${escapeHtml(String(c.page_number))}` : '';
-          return `<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-ctp-surface0 text-ctp-subtext0 border border-ctp-surface1">${bt}${pg}</span>`;
+          return `<span class="label">${bt}${pg}</span>`;
         })
         .join(' ');
 
       messagesContainer.insertAdjacentHTML('beforeend', `
-        <div class="rounded-2xl p-4 space-y-2 shadow-md ${cardBorder}">
-          ${metaInfo ? `<div class="flex items-center gap-2">${metaInfo}</div>` : ''}
-          <div class="text-sm text-ctp-text leading-relaxed font-medium">
+        <div class="${cardClass}">
+          ${metaInfo ? `<div class="meta-row">${metaInfo}</div>` : ''}
+          <div class="msg-body">
             ${formatSimpleMarkdown(data.answer || '')}
           </div>
-          ${chunkMeta ? `<div class="flex flex-wrap gap-1.5 pt-1">${chunkMeta}</div>` : ''}
+          ${chunkMeta ? `<div class="chip-row">${chunkMeta}</div>` : ''}
         </div>
       `);
     }
 
     function formatSimpleMarkdown(text) {
       return escapeHtml(text)
-        .replace(/\*\*(.+?)\*\*/g, '<strong class="text-ctp-lavender font-extrabold">$1</strong>')
-        .replace(/\*(.+?)\*/g, '<em class="text-ctp-subtext1">$1</em>')
-        .replace(/`([^`]+)`/g, '<code class="px-2 py-0.5 rounded bg-ctp-surface0 text-ctp-teal font-mono text-xs font-bold border border-ctp-surface1">$1</code>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
         .replace(/\n/g, '<br/>');
     }
 
