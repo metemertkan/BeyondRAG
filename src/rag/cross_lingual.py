@@ -5,6 +5,9 @@ Provides independent contracts:
   - QueryTranslator: Translates queries across supported languages with fallback & logging
   - ConceptExtractor: Extracts domain concepts independently of embedding models
   - MultilingualQueryAdapter: Orchestrator implementing CrossLingualPort
+
+Product language lists, trigger field names, and extraction prompts live in
+``language_packs`` / JSON config — not as hardcoded constants here.
 """
 
 from __future__ import annotations
@@ -14,7 +17,6 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Final, List, Optional, Protocol, Tuple
 
@@ -40,13 +42,11 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-_CJK_CHAR_RE: Final[re.Pattern[str]] = re.compile(r"[\u4e00-\uffff]")
-
 DYNAMIC_CONCEPTS_PATH: Final[Path] = WORKSPACE_DIR / "dynamic_concepts.json"
 
 
 def load_language_pack(path: str | Path | None = None) -> LanguagePackRegistry:
-    """Load language packs from JSON (config/data-driven; EN/ZH are default data)."""
+    """Load language packs from JSON (config/data-driven defaults live in pack data)."""
     packs_path = Path(path) if path else None
     return LanguagePackRegistry(packs_path=packs_path)
 
@@ -55,7 +55,7 @@ class LanguageDetector(Protocol):
     """Protocol for detecting natural language of texts."""
 
     def detect(self, text: str) -> str:
-        """Return ISO 639-1 language code (e.g. 'en', 'zh', 'ja', 'ko', 'es', 'fr', 'de')."""
+        """Return a language code from the configured pack registry."""
         ...
 
 
@@ -89,18 +89,12 @@ class RuleBasedLanguageDetector:
         self.pack_registry = pack_registry or get_language_pack_registry()
 
     def detect(self, text: str) -> str:
+        corpus = self.pack_registry.corpus_language
         if not text or not text.strip():
-            return self.pack_registry.corpus_language or "en"
+            return corpus
 
         cleaned = text.strip()
-        # Prefer non-CJK script packs first (JA/KO/RU/AR) so Han-overlap languages win.
-        priority = ["ja", "ko", "ru", "ar", "zh", "fr", "es", "de", "tr"]
-        ordered = [c for c in priority if self.pack_registry.get(c)]
-        ordered.extend(
-            c for c in self.pack_registry.supported_languages if c not in ordered and c != "en"
-        )
-
-        for code in ordered:
+        for code in self.pack_registry.ordered_detection_codes():
             pack = self.pack_registry.get(code)
             if pack is None:
                 continue
@@ -108,46 +102,66 @@ class RuleBasedLanguageDetector:
                 if pattern.search(cleaned):
                     return code
             if pack.marker_words:
-                # Strip punctuation so ¿Cuál / cómo? still match pack markers.
+                # Strip punctuation so accented / inverted-mark queries still match markers.
                 normalized = re.sub(r"[^\w\s]", " ", cleaned.lower(), flags=re.UNICODE)
                 padded = f" {normalized} "
                 if any(f" {w} " in padded for w in pack.marker_words):
                     return code
 
-        return "en"
+        return corpus
+
+
+def _pack_script_matches(text: str, pack: LanguagePack) -> bool:
+    return any(p.search(text) for p in pack.compiled_scripts())
 
 
 def _matches_pack_triggers(
     text: str,
     triggers: List[str],
     *,
-    generic_bigrams: Optional[set[str]] = None,
+    pack: Optional[LanguagePack] = None,
 ) -> bool:
-    """Return True if text matches a trigger phrase (script-aware bigram fallback for CJK)."""
+    """Return True if text matches a trigger phrase (script-aware bigrams from pack data)."""
     if not triggers:
         return False
-    blocked = generic_bigrams or set()
-    for zt in triggers:
-        if not zt:
+    blocked = set(pack.generic_bigrams) if pack else set()
+    use_bigrams = bool(pack and pack.script_patterns and pack.generic_bigrams)
+    for trigger in triggers:
+        if not trigger:
             continue
-        if zt in text:
+        if trigger in text:
             return True
-        if len(zt) >= 2 and _CJK_CHAR_RE.search(zt):
-            for i in range(len(zt) - 1):
-                bg = zt[i : i + 2]
-                if len(_CJK_CHAR_RE.findall(bg)) == 2 and bg not in blocked:
-                    if bg in text:
-                        return True
+        if use_bigrams and pack is not None and _pack_script_matches(trigger, pack):
+            for i in range(len(trigger) - 1):
+                bg = trigger[i : i + 2]
+                if bg in blocked:
+                    continue
+                if _pack_script_matches(bg, pack) and bg in text:
+                    return True
     return False
 
 
-def _matches_zh_triggers(text: str, zh_triggers: List[str]) -> bool:
-    """Backward-compatible ZH trigger helper; bigrams come from the ZH language pack."""
-    if not _CJK_CHAR_RE.search(text):
-        return False
-    pack = get_language_pack_registry().get("zh")
-    generic = set(pack.generic_bigrams) if pack else set()
-    return _matches_pack_triggers(text, zh_triggers, generic_bigrams=generic)
+def _matches_script_triggers(
+    text: str,
+    triggers: List[str],
+    *,
+    pack: Optional[LanguagePack] = None,
+) -> bool:
+    """Match triggers using pack script/bigram config; latin packs casefold."""
+    if pack is not None and pack.script_patterns:
+        if not _pack_script_matches(text, pack):
+            return any(t and t in text for t in triggers)
+        return _matches_pack_triggers(text, triggers, pack=pack)
+    lowered = text.lower()
+    return any(t and t.lower() in lowered for t in triggers)
+
+
+def _should_casefold_field(field_name: str, packs: LanguagePackRegistry) -> bool:
+    """Casefold triggers for packs without script_patterns (configured, not hardcoded)."""
+    for pack in packs._packs.values():  # noqa: SLF001
+        if pack.concept_trigger_field == field_name:
+            return not bool(pack.script_patterns)
+    return False
 
 
 class DynamicConceptRegistry:
@@ -182,8 +196,16 @@ class DynamicConceptRegistry:
             encoding="utf-8",
         )
 
-    def get_all_concepts(self) -> List[Tuple[str, List[str], List[str], str]]:
-        concepts: List[Tuple[str, List[str], List[str], str]] = []
+    def get_all_concepts(
+        self,
+        *,
+        pack_registry: Optional[LanguagePackRegistry] = None,
+    ) -> List[Tuple[str, Dict[str, List[str]], str]]:
+        """Return (concept_id, triggers_by_field, expansion) using pack-configured field names."""
+        packs = pack_registry or get_language_pack_registry()
+        expansion_field = packs.expansion_field()
+        configured = set(packs.trigger_fields())
+        concepts: List[Tuple[str, Dict[str, List[str]], str]] = []
         seen_ids: set[str] = set()
         for doc_entry in self._documents.values():
             for item in doc_entry.get("concepts", []):
@@ -191,11 +213,23 @@ class DynamicConceptRegistry:
                 if not cid or cid in seen_ids:
                     continue
                 seen_ids.add(cid)
-                en_t = [str(x).lower().strip() for x in item.get("en_triggers", []) if str(x).strip()]
-                zh_t = [str(x).strip() for x in item.get("zh_triggers", []) if str(x).strip()]
-                en_exp = str(item.get("en_expansion", "")).strip()
-                if en_t or zh_t:
-                    concepts.append((cid, en_t, zh_t, en_exp))
+                triggers_by_field: Dict[str, List[str]] = {}
+                for key, value in item.items():
+                    field_name = str(key)
+                    if configured and field_name not in configured:
+                        continue
+                    if not field_name.endswith("_triggers"):
+                        continue
+                    if not isinstance(value, list):
+                        continue
+                    cleaned = [str(x).strip() for x in value if str(x).strip()]
+                    if cleaned:
+                        if _should_casefold_field(field_name, packs):
+                            cleaned = [t.lower() for t in cleaned]
+                        triggers_by_field[field_name] = cleaned
+                expansion = str(item.get(expansion_field, "")).strip()
+                if triggers_by_field:
+                    concepts.append((cid, triggers_by_field, expansion))
         return concepts
 
     def get_document_concepts(self, content_hash: str) -> List[Dict[str, Any]] | None:
@@ -248,13 +282,15 @@ def _select_ollama_model() -> str:
     return env_model
 
 
-def extract_bilingual_concepts_at_ingestion(
+def extract_concepts_at_ingestion(
     filename: str,
     full_text: str,
     force_refresh: bool = False,
+    pack_registry: Optional[LanguagePackRegistry] = None,
 ) -> Tuple[List[Dict[str, Any]], str]:
     """Extract or retrieve cached concept mappings for uploaded documents."""
     registry = get_concept_registry()
+    packs = pack_registry or get_language_pack_registry()
     content_hash = hashlib.sha256(full_text.strip().encode("utf-8")).hexdigest()[:16]
 
     if not force_refresh:
@@ -264,20 +300,22 @@ def extract_bilingual_concepts_at_ingestion(
             return cached, model_name
 
     model_name = _select_ollama_model()
-    prompt_text = (
-        f"Document: {filename}\n"
-        f"Text:\n{full_text[:2500]}\n\n"
-        "Extract 3 distinct domain concepts from the text so users can search this English PDF using "
-        "Traditional Chinese (Hong Kong), Simplified Chinese, or English.\n"
-        "Return ONLY JSON:\n"
-        '{"concepts": [{"concept_id": "concept:unique_name", "en_triggers": ["kw1"], "zh_triggers": ["繁體", "简体"], "en_expansion": "english keywords"}]}'
+    system_prompt, user_prompt = packs.concept_extraction_prompts(
+        filename=filename,
+        text=full_text,
     )
+    trigger_fields = packs.trigger_fields()
+    expansion_field = packs.expansion_field()
+    corpus_field = None
+    corpus_pack = packs.get(packs.corpus_language)
+    if corpus_pack is not None:
+        corpus_field = corpus_pack.concept_trigger_field
 
     payload = {
         "model": model_name,
         "messages": [
-            {"role": "system", "content": "Extract bilingual EN<->ZH search concepts as compact JSON."},
-            {"role": "user", "content": prompt_text},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
         ],
         "stream": False,
         "think": False,
@@ -297,18 +335,27 @@ def extract_bilingual_concepts_at_ingestion(
                     if not isinstance(item, dict):
                         continue
                     cid = f"concept:{content_hash[:6]}_{idx}"
-                    en_t = [str(x).lower().strip() for x in item.get("en_triggers", []) if str(x).strip()]
-                    zh_t = [str(x).strip() for x in item.get("zh_triggers", []) if str(x).strip()]
-                    en_exp = str(item.get("en_expansion") or " ".join(en_t)).strip()
-                    if en_t or zh_t:
-                        extracted_concepts.append(
-                            {
-                                "concept_id": cid,
-                                "en_triggers": en_t,
-                                "zh_triggers": zh_t,
-                                "en_expansion": en_exp,
-                            }
-                        )
+                    concept: Dict[str, Any] = {"concept_id": cid}
+                    any_triggers = False
+                    for field_name in trigger_fields:
+                        raw_triggers = item.get(field_name, [])
+                        if not isinstance(raw_triggers, list):
+                            continue
+                        cleaned = [str(x).strip() for x in raw_triggers if str(x).strip()]
+                        if _should_casefold_field(field_name, packs):
+                            cleaned = [t.lower() for t in cleaned]
+                        if cleaned:
+                            concept[field_name] = cleaned
+                            any_triggers = True
+                    fallback_triggers = (
+                        concept.get(corpus_field, []) if corpus_field else []
+                    )
+                    expansion = str(
+                        item.get(expansion_field) or " ".join(fallback_triggers)
+                    ).strip()
+                    concept[expansion_field] = expansion
+                    if any_triggers:
+                        extracted_concepts.append(concept)
     except Exception:
         extracted_concepts = []
 
@@ -323,18 +370,51 @@ def extract_bilingual_concepts_at_ingestion(
     return extracted_concepts, f"ollama/{model_name}"
 
 
-def expand_cross_lingual_query(query: str) -> Tuple[str, List[str]]:
-    """Expand query with registered bilingual triggers."""
+# Backward-compatible alias (name is historical; behaviour is pack-driven).
+extract_bilingual_concepts_at_ingestion = extract_concepts_at_ingestion
+
+
+def expand_cross_lingual_query(
+    query: str,
+    pack_registry: Optional[LanguagePackRegistry] = None,
+) -> Tuple[str, List[str]]:
+    """Expand query with registered multilingual triggers from language packs."""
+    packs = pack_registry or get_language_pack_registry()
     lowered = query.lower()
     matched_concepts: List[str] = []
     expansions: List[str] = []
 
-    dynamic_concepts = get_concept_registry().get_all_concepts()
-    for concept_id, en_triggers, zh_triggers, en_expansion in dynamic_concepts:
-        if _matches_zh_triggers(query, zh_triggers) or any(et in lowered for et in en_triggers):
+    # Map trigger field → pack (for bigram / script-aware matching).
+    field_to_pack: Dict[str, LanguagePack] = {}
+    for pack in packs._packs.values():  # noqa: SLF001 — pack iteration
+        if pack.concept_trigger_field:
+            field_to_pack[pack.concept_trigger_field] = pack
+
+    corpus_pack = packs.get(packs.corpus_language)
+    corpus_field = corpus_pack.concept_trigger_field if corpus_pack else None
+    configured_fields = set(packs.trigger_fields())
+
+    for concept_id, triggers_by_field, expansion in get_concept_registry().get_all_concepts(
+        pack_registry=packs
+    ):
+        hit = False
+        matched_via_non_corpus = False
+        for field_name, triggers in triggers_by_field.items():
+            if field_name not in configured_fields:
+                continue
+            pack = field_to_pack.get(field_name)
+            if pack is not None:
+                matched = _matches_script_triggers(query, triggers, pack=pack)
+            else:
+                matched = any(t.lower() in lowered for t in triggers)
+            if matched:
+                hit = True
+                if corpus_field is None or field_name != corpus_field:
+                    matched_via_non_corpus = True
+        if hit:
             matched_concepts.append(concept_id)
-            if _CJK_CHAR_RE.search(query) and en_expansion:
-                expansions.append(en_expansion)
+            if matched_via_non_corpus and expansion:
+                expansions.append(expansion)
 
     if expansions:
         expanded = f"{query} {' '.join(expansions)}"
@@ -438,7 +518,8 @@ class MultilingualQueryAdapter:
         self.corpus_language = (
             corpus_language
             or self.language_pack.corpus_language
-            or os.getenv("RAG_CORPUS_LANGUAGE", "en")
+            or os.getenv("RAG_CORPUS_LANGUAGE", "").strip()
+            or (self.language_pack.supported_languages[0] if self.language_pack.supported_languages else "")
         )
         self.supported_languages = supported_languages or list(self.language_pack.supported_languages)
 
@@ -452,8 +533,11 @@ class MultilingualQueryAdapter:
         filename: str,
         full_text: str,
     ) -> Tuple[List[Dict[str, Any]], str]:
-        # Uses registered bilingual concept table backed by dynamic_concepts.json
-        return extract_bilingual_concepts_at_ingestion(filename, full_text)
+        return extract_concepts_at_ingestion(
+            filename,
+            full_text,
+            pack_registry=self.language_pack,
+        )
 
     def prepare_query(
         self,
@@ -462,7 +546,10 @@ class MultilingualQueryAdapter:
     ) -> Tuple[str, List[str]]:
         """Prepare search query with language detection, concept expansion, and fallback translation."""
         source_lang = self.detector.detect(question)
-        expanded_query, matched_concepts = expand_cross_lingual_query(question)
+        expanded_query, matched_concepts = expand_cross_lingual_query(
+            question,
+            pack_registry=self.language_pack,
+        )
 
         if matched_concepts or source_lang == self.corpus_language:
             return expanded_query, matched_concepts

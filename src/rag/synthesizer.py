@@ -89,11 +89,6 @@ class GroundedAnswerSynthesizer:
             if masked_restricted_docs:
                 locked_doc = masked_restricted_docs[0]["filename"]
                 req_role_str = ", ".join(masked_restricted_docs[0]["required_any_of_tags"])
-                if is_cjk_query:
-                    return (
-                        f"🔒 **RBAC 權限攔截 (Access Blocked)**\n"
-                        f"📄 `{locked_doc}` — Required Role: **`{req_role_str}`**"
-                    )
                 return (
                     f"🔒 **Access Blocked by RBAC Pre-Filter**\n"
                     f"📄 `{locked_doc}` — Required Role: **`{req_role_str}`**"
@@ -107,10 +102,10 @@ class GroundedAnswerSynthesizer:
                     f"Content: {c['content']}"
                     for c in relevant_chunks
                 )
+                # Language choice is query-driven — no hardcoded language-pair instruction map.
                 lang_instruction = (
-                    "Respond in Traditional Chinese in 2 concise bullet points citing [filename.pdf, p. 1]."
-                    if is_cjk_query
-                    else "Respond in English in 2 concise bullet points citing [filename.pdf, p. 1]."
+                    "Respond in the same language as the user's question in 2 concise "
+                    "bullet points citing [filename.pdf, p. 1]."
                 )
                 prompt = ChatPromptTemplate.from_messages(
                     [
@@ -150,15 +145,13 @@ class GroundedAnswerSynthesizer:
         for prefix in _BANNER_PREFIXES:
             raw_text = raw_text.replace(prefix, "").strip()
 
-        if is_cjk_query:
-            return (
-                f"✅ **跨語言檢索成功 (ZH → EN PDF Unlocked)**\n"
-                f"📄 `{top['filename']}` *(Role: `{tag_label}`)*\n"
-                f"💡 {raw_text[:155]}..."
-            )
-
+        banner = (
+            "✅ **Cross-lingual match retrieved**"
+            if is_cjk_query
+            else "✅ **Authorized Match Retrieved**"
+        )
         return (
-            f"✅ **Authorized Match Retrieved**\n"
+            f"{banner}\n"
             f"📄 `{top['filename']}` *(Role: `{tag_label}`)*\n"
             f"💡 {raw_text[:155]}..."
         )

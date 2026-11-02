@@ -42,6 +42,8 @@ class ParsedDocument:
     pages: List[tuple[int, str]]
     blocks: List[ParsedBlock] = field(default_factory=list)
     parser_name: str = ""
+    parser_degraded: bool = False
+    parser_fallback_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -69,7 +71,7 @@ class Concept:
     concept_id: str
     triggers: List[str]
     expansion: str
-    source_language: str = "en"
+    source_language: str = ""
     target_language: Optional[str] = None
 
 
@@ -97,6 +99,8 @@ class IngestionReport:
     supersedes_doc_id: Optional[str] = None
     embedding_manifest: str = ""
     parser_name: str = ""
+    parser_degraded: bool = False
+    parser_fallback_reason: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -120,6 +124,8 @@ class IngestionReport:
             "supersedes_doc_id": self.supersedes_doc_id,
             "embedding_manifest": self.embedding_manifest,
             "parser_name": self.parser_name,
+            "parser_degraded": self.parser_degraded,
+            "parser_fallback_reason": self.parser_fallback_reason,
         }
 
     @classmethod
@@ -150,4 +156,6 @@ class IngestionReport:
             supersedes_doc_id=data.get("supersedes_doc_id"),
             embedding_manifest=str(data.get("embedding_manifest") or ""),
             parser_name=str(data.get("parser_name") or ""),
+            parser_degraded=bool(data.get("parser_degraded", False)),
+            parser_fallback_reason=str(data.get("parser_fallback_reason") or ""),
         )

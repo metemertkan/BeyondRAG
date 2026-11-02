@@ -25,6 +25,7 @@ from src.rag.embeddings import (
     assert_manifest_compatible,
     assert_vector_matches_manifest,
 )
+from src.rag.extractor import ParserDegradedError
 from src.rag.models import IngestionReport, IngestionState, ParsedBlock, ParsedDocument
 from src.rag.ports import (
     ChunkerPort,
@@ -170,6 +171,7 @@ class PdfIngestor:
         tenant: str,
         manifest: EmbeddingManifest,
         parser_name: str,
+        chunks_current: bool = True,
     ) -> List[Dict[str, Any]]:
         chunk_records: List[Dict[str, Any]] = []
         global_chunk_idx = 0
@@ -212,7 +214,7 @@ class PdfIngestor:
                     "content_hash": content_hash,
                     "doc_version": doc_version,
                     "tenant": tenant,
-                    "is_current": True,
+                    "is_current": chunks_current,
                     "ingestion_status": IngestionState.INDEXED.value,
                     "embedding_manifest": manifest.config_identifier,
                     "parser_name": parser_name,
@@ -253,13 +255,12 @@ class PdfIngestor:
 
         # Same bytes already current → idempotent re-index path (no new version).
         same_bytes_retry = previous_current_id == assigned_doc_id
+        same_bytes_prior: Optional[IngestionReport] = None
+        if same_bytes_retry and hasattr(self._repository, "get_document_state"):
+            same_bytes_prior = self._repository.get_document_state(assigned_doc_id)
 
         if hasattr(self._repository, "next_doc_version"):
-            existing_state = (
-                self._repository.get_document_state(assigned_doc_id)
-                if same_bytes_retry
-                else None
-            )
+            existing_state = same_bytes_prior if same_bytes_retry else None
             doc_version = (
                 existing_state.doc_version
                 if existing_state is not None
@@ -269,6 +270,7 @@ class PdfIngestor:
             doc_version = 1
 
         # 1. State: PENDING (accepted) — recorded before any parse/embed work.
+        # Same-bytes retry keeps is_current=True so observers never see zero currents.
         pending_report = IngestionReport(
             doc_id=assigned_doc_id,
             filename=safe_filename,
@@ -283,9 +285,10 @@ class PdfIngestor:
             content_hash=digest,
             doc_version=doc_version,
             tenant=tenant_norm,
-            is_current=False,
+            is_current=bool(same_bytes_retry),
             supersedes_doc_id=None if same_bytes_retry else previous_current_id,
             embedding_manifest="",
+            parser_name=(same_bytes_prior.parser_name if same_bytes_prior else ""),
         )
         self._set_state(pending_report)
 
@@ -303,9 +306,10 @@ class PdfIngestor:
             content_hash=digest,
             doc_version=doc_version,
             tenant=tenant_norm,
-            is_current=False,
+            is_current=bool(same_bytes_retry),
             supersedes_doc_id=None if same_bytes_retry else previous_current_id,
             embedding_manifest="",
+            parser_name=(same_bytes_prior.parser_name if same_bytes_prior else ""),
         )
         self._set_state(processing_report)
 
@@ -322,6 +326,22 @@ class PdfIngestor:
                     "Ensure the document contains selectable text."
                 )
 
+            # Same-bytes retry must not silently replace layout-aware INDEXED tables with flat PyPDF.
+            # Use the pre-PENDING snapshot — registry state is already PROCESSING here.
+            if same_bytes_retry and same_bytes_prior is not None:
+                if same_bytes_prior.status == IngestionState.INDEXED:
+                    prev_parser = (same_bytes_prior.parser_name or "").lower()
+                    new_parser = (parsed.parser_name or "").lower()
+                    degraded = bool(getattr(parsed, "parser_degraded", False))
+                    if prev_parser == "pdfplumber" and (degraded or new_parser == "pypdf"):
+                        reason = getattr(parsed, "parser_fallback_reason", "") or (
+                            "layout-aware → flat parser on same-bytes retry"
+                        )
+                        raise ParserDegradedError(
+                            "Same-bytes retry would replace pdfplumber INDEXED table chunks "
+                            f"with degraded parser '{parsed.parser_name}' ({reason}). Refusing."
+                        )
+
             full_doc_text = "\n\n".join(
                 b.text for b in parsed.blocks if b.text
             ) or "\n\n".join(text for _, text in parsed.pages)
@@ -331,6 +351,13 @@ class PdfIngestor:
             )
             concept_ids = [c["concept_id"] for c in extracted_concepts]
 
+            # Stage-then-publish: when replacing another version, stage chunks as
+            # non-current first so v1 stays the sole searchable current until publish.
+            revising = (
+                bool(previous_current_id)
+                and previous_current_id != assigned_doc_id
+                and not same_bytes_retry
+            )
             chunk_records = self._build_chunks_from_blocks(
                 blocks=list(parsed.blocks),
                 pages=list(parsed.pages),
@@ -344,16 +371,8 @@ class PdfIngestor:
                 tenant=tenant_norm,
                 manifest=manifest,
                 parser_name=parsed.parser_name,
+                chunks_current=not revising,
             )
-
-            # Soft-supersede previous current version BEFORE indexing the new one
-            # so search never treats both as current. Same-bytes retry skips this.
-            if (
-                previous_current_id
-                and previous_current_id != assigned_doc_id
-                and hasattr(self._repository, "mark_superseded")
-            ):
-                self._repository.mark_superseded(previous_current_id)
 
             if hasattr(self._repository, "delete_chunks"):
                 self._repository.delete_chunks(assigned_doc_id)
@@ -385,8 +404,20 @@ class PdfIngestor:
                 supersedes_doc_id=None if same_bytes_retry else previous_current_id,
                 embedding_manifest=manifest.config_identifier,
                 parser_name=parsed.parser_name,
+                parser_degraded=bool(getattr(parsed, "parser_degraded", False)),
+                parser_fallback_reason=str(getattr(parsed, "parser_fallback_reason", "") or ""),
             )
-            self._set_state(success_report)
+
+            # Publish only after v2 chunks are written: INDEXED v2 then flip v1→SUPERSEDED.
+            if revising and hasattr(self._repository, "publish_new_current"):
+                self._repository.publish_new_current(
+                    success_report,
+                    previous_doc_id=previous_current_id,
+                )
+            else:
+                self._set_state(success_report)
+                if revising and hasattr(self._repository, "mark_superseded"):
+                    self._repository.mark_superseded(previous_current_id)
 
             return {
                 "doc_id": assigned_doc_id,
@@ -408,6 +439,10 @@ class PdfIngestor:
                 "supersedes_doc_id": None if same_bytes_retry else previous_current_id,
                 "embedding_manifest": manifest.config_identifier,
                 "parser_name": parsed.parser_name,
+                "parser_degraded": bool(getattr(parsed, "parser_degraded", False)),
+                "parser_fallback_reason": str(
+                    getattr(parsed, "parser_fallback_reason", "") or ""
+                ),
             }
 
         except Exception as exc:
@@ -417,47 +452,20 @@ class PdfIngestor:
                 safe_filename,
                 exc,
             )
-            # Do not leave a half-indexed new version as current. If we already
-            # soft-superseded the previous version, restore it as current when
-            # the new version never reached INDEXED (best-effort for sandbox).
-            self._repository.delete_document(assigned_doc_id)
-
-            if (
-                previous_current_id
-                and previous_current_id != assigned_doc_id
-                and hasattr(self._repository, "get_document_state")
-                and hasattr(self._repository, "set_document_state")
-            ):
-                prev = self._repository.get_document_state(previous_current_id)
-                if prev is not None and prev.status == IngestionState.SUPERSEDED:
-                    restored = IngestionReport(
-                        doc_id=prev.doc_id,
-                        filename=prev.filename,
-                        status=IngestionState.INDEXED,
-                        page_count=prev.page_count,
-                        chunk_count=prev.chunk_count,
-                        is_public=prev.is_public,
-                        tags=list(prev.tags),
-                        acl_tags=list(prev.acl_tags),
-                        uploaded_at=prev.uploaded_at,
-                        dynamic_concepts=list(prev.dynamic_concepts),
-                        concept_model=prev.concept_model,
-                        source_key=prev.source_key,
-                        content_hash=prev.content_hash,
-                        doc_version=prev.doc_version,
-                        tenant=prev.tenant,
+            if same_bytes_retry and same_bytes_prior is not None:
+                # Never wipe an already-INDEXED same-bytes doc (esp. degraded refuse).
+                self._repository.set_document_state(same_bytes_prior)
+                if hasattr(self._repository, "_set_chunks_current"):
+                    self._repository._set_chunks_current(  # noqa: SLF001
+                        assigned_doc_id,
                         is_current=True,
-                        supersedes_doc_id=prev.supersedes_doc_id,
-                        embedding_manifest=prev.embedding_manifest,
-                        parser_name=prev.parser_name,
+                        status=IngestionState.INDEXED.value,
                     )
-                    self._repository.set_document_state(restored)
-                    if hasattr(self._repository, "_set_chunks_current"):
-                        self._repository._set_chunks_current(  # noqa: SLF001 — sandbox restore path
-                            previous_current_id,
-                            is_current=True,
-                            status=IngestionState.INDEXED.value,
-                        )
+                raise
+
+            # Stage-then-publish: v1 was never superseded before v2 INDEXED, so a
+            # failed revision leaves the previous current searchable without restore.
+            self._repository.delete_document(assigned_doc_id)
 
             failed_report = IngestionReport(
                 doc_id=assigned_doc_id,
@@ -476,7 +484,9 @@ class PdfIngestor:
                 tenant=tenant_norm,
                 is_current=False,
                 supersedes_doc_id=None if same_bytes_retry else previous_current_id,
-                embedding_manifest=manifest.config_identifier,
+                embedding_manifest=(
+                    manifest.config_identifier if "manifest" in locals() else ""
+                ),
             )
             self._set_state(failed_report)
 

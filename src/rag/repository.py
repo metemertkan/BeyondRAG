@@ -129,6 +129,8 @@ class DocumentRepository:
             supersedes_doc_id=existing.supersedes_doc_id,
             embedding_manifest=existing.embedding_manifest,
             parser_name=existing.parser_name,
+            parser_degraded=existing.parser_degraded,
+            parser_fallback_reason=existing.parser_fallback_reason,
         )
         self._doc_states[doc_id] = superseded
         self._set_chunks_current(doc_id, is_current=False, status=IngestionState.SUPERSEDED.value)
@@ -367,8 +369,65 @@ class DocumentRepository:
                     supersedes_doc_id=existing.supersedes_doc_id,
                     embedding_manifest=existing.embedding_manifest,
                     parser_name=existing.parser_name,
+                    parser_degraded=existing.parser_degraded,
+                    parser_fallback_reason=existing.parser_fallback_reason,
                 )
             )
+
+    def publish_new_current(
+        self,
+        report: IngestionReport,
+        previous_doc_id: Optional[str] = None,
+    ) -> None:
+        """Atomically publish ``report`` as the sole current INDEXED doc for its source_key.
+
+        Stage-then-publish: caller indexes the new version's chunks first (typically
+        with ``is_current=False``), then calls this to flip currentness. Previous
+        current (if any) is soft-superseded in the same step so observers never see
+        zero currents and never see two currents for the same source_key.
+        """
+        if report.status != IngestionState.INDEXED or not report.is_current:
+            raise ValueError("publish_new_current requires an INDEXED is_current report")
+
+        prev_id = previous_doc_id
+        if prev_id and prev_id != report.doc_id:
+            existing = self._doc_states.get(prev_id)
+            if existing is not None:
+                self._doc_states[prev_id] = IngestionReport(
+                    doc_id=existing.doc_id,
+                    filename=existing.filename,
+                    status=IngestionState.SUPERSEDED,
+                    page_count=existing.page_count,
+                    chunk_count=existing.chunk_count,
+                    is_public=existing.is_public,
+                    tags=list(existing.tags),
+                    acl_tags=list(existing.acl_tags),
+                    uploaded_at=existing.uploaded_at,
+                    dynamic_concepts=list(existing.dynamic_concepts),
+                    concept_model=existing.concept_model,
+                    error_message=existing.error_message,
+                    source_key=existing.source_key,
+                    content_hash=existing.content_hash,
+                    doc_version=existing.doc_version,
+                    tenant=existing.tenant,
+                    is_current=False,
+                    supersedes_doc_id=existing.supersedes_doc_id,
+                    embedding_manifest=existing.embedding_manifest,
+                    parser_name=existing.parser_name,
+                    parser_degraded=existing.parser_degraded,
+                    parser_fallback_reason=existing.parser_fallback_reason,
+                )
+                self._set_chunks_current(
+                    prev_id, is_current=False, status=IngestionState.SUPERSEDED.value
+                )
+
+        self._doc_states[report.doc_id] = report
+        if report.source_key:
+            self._current_by_source_key[report.source_key] = report.doc_id
+        self._set_chunks_current(
+            report.doc_id, is_current=True, status=IngestionState.INDEXED.value
+        )
+        self._persist_registry()
 
     def delete_chunks(self, doc_id: str) -> None:
         """Remove a document's indexed chunks without deleting the uploaded file."""

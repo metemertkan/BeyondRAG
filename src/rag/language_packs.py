@@ -3,6 +3,8 @@
 Episode 2 rule: no hardcoded product languages in orchestration code.
 EN and ZH ship as the default pack data; additional languages are added by
 loading another JSON pack (or extending ``workspace/language_packs.json``).
+Detection priority, concept-trigger field names, and extraction prompts live
+here (or in the JSON override) — not in ``cross_lingual.py``.
 """
 
 from __future__ import annotations
@@ -18,10 +20,30 @@ from src.config import WORKSPACE_DIR
 
 DEFAULT_PACKS_PATH: Final[Path] = WORKSPACE_DIR / "language_packs.json"
 
-# Built-in seed data (EN corpus + ZH query triggers). Not imported as constants
-# into detectors — loaded through LanguagePackRegistry so tests can swap packs.
+# Built-in seed data. Not imported as constants into detectors — loaded through
+# LanguagePackRegistry so tests can swap packs (including removing EN/ZH).
+_DEFAULT_CONCEPT_EXTRACTION: Final[Dict[str, Any]] = {
+    "system_prompt": (
+        "Extract multilingual search concepts as compact JSON. "
+        "Use the trigger field names supplied in the user prompt for each language."
+    ),
+    "user_prompt_template": (
+        "Document: {filename}\n"
+        "Text:\n{text}\n\n"
+        "Extract 3 distinct domain concepts from the text so users can search this document using "
+        "any of the configured languages ({language_names}).\n"
+        "Return ONLY JSON:\n"
+        '{{"concepts": [{{"concept_id": "concept:unique_name", {trigger_schema}, '
+        '"en_expansion": "english keywords"}}]}}'
+    ),
+    "expansion_field": "en_expansion",
+}
+
 _BUILTIN_DEFAULT_PACKS: Final[Dict[str, Any]] = {
     "corpus_language": "en",
+    # Script-first order so Han-overlap languages (JA before ZH) win on mixed CJK.
+    "detection_priority": ["ja", "ko", "ru", "ar", "zh", "fr", "es", "de", "tr"],
+    "concept_extraction": dict(_DEFAULT_CONCEPT_EXTRACTION),
     "packs": {
         "en": {
             "language_code": "en",
@@ -135,10 +157,6 @@ class LanguagePackRegistry:
         else:
             payload = _BUILTIN_DEFAULT_PACKS
 
-        self.corpus_language: str = str(
-            payload.get("corpus_language")
-            or os.getenv("RAG_CORPUS_LANGUAGE", "en")
-        ).strip().lower() or "en"
         self._packs: Dict[str, LanguagePack] = {}
         for code, entry in (payload.get("packs") or {}).items():
             if not isinstance(entry, dict):
@@ -155,12 +173,106 @@ class LanguagePackRegistry:
                 generic_bigrams=[str(b) for b in entry.get("generic_bigrams") or []],
             )
 
+        # Corpus language comes from pack JSON / env / first loaded pack — never a code default.
+        configured_corpus = str(
+            payload.get("corpus_language") or os.getenv("RAG_CORPUS_LANGUAGE", "")
+        ).strip().lower()
+        if configured_corpus:
+            self.corpus_language: str = configured_corpus
+        elif self._packs:
+            self.corpus_language = next(iter(self._packs.keys()))
+        else:
+            self.corpus_language = ""
+
+        configured_priority = payload.get("detection_priority")
+        if isinstance(configured_priority, list) and configured_priority:
+            self.detection_priority: List[str] = [
+                str(c).strip().lower() for c in configured_priority if str(c).strip()
+            ]
+        else:
+            # Fall back to pack insertion order excluding corpus language.
+            self.detection_priority = [
+                c for c in self._packs.keys() if c != self.corpus_language
+            ]
+
+        extraction = payload.get("concept_extraction")
+        if isinstance(extraction, dict) and extraction:
+            merged = dict(_DEFAULT_CONCEPT_EXTRACTION)
+            merged.update(extraction)
+            self.concept_extraction: Dict[str, Any] = merged
+        else:
+            self.concept_extraction = dict(_DEFAULT_CONCEPT_EXTRACTION)
+
     @property
     def supported_languages(self) -> List[str]:
         return sorted(self._packs.keys())
 
     def get(self, language_code: str) -> Optional[LanguagePack]:
         return self._packs.get(language_code.strip().lower())
+
+    def ordered_detection_codes(self) -> List[str]:
+        """Return detection order: configured priority (present packs), then remaining."""
+        ordered = [c for c in self.detection_priority if c in self._packs]
+        ordered.extend(
+            c
+            for c in self.supported_languages
+            if c not in ordered and c != self.corpus_language
+        )
+        return ordered
+
+    def trigger_fields(self) -> List[str]:
+        """Concept JSON field names derived from loaded packs (not hardcoded)."""
+        fields: List[str] = []
+        seen: set[str] = set()
+        for code in self.ordered_detection_codes() + [self.corpus_language]:
+            pack = self.get(code)
+            if pack is None:
+                continue
+            field_name = pack.concept_trigger_field
+            if field_name and field_name not in seen:
+                seen.add(field_name)
+                fields.append(field_name)
+        for pack in self._packs.values():
+            if pack.concept_trigger_field and pack.concept_trigger_field not in seen:
+                seen.add(pack.concept_trigger_field)
+                fields.append(pack.concept_trigger_field)
+        return fields
+
+    def concept_extraction_prompts(
+        self,
+        *,
+        filename: str,
+        text: str,
+    ) -> tuple[str, str]:
+        """Build system + user prompts from pack config (no EN/ZH literals in callers)."""
+        system = str(
+            self.concept_extraction.get("system_prompt")
+            or _DEFAULT_CONCEPT_EXTRACTION["system_prompt"]
+        )
+        template = str(
+            self.concept_extraction.get("user_prompt_template")
+            or _DEFAULT_CONCEPT_EXTRACTION["user_prompt_template"]
+        )
+        names = ", ".join(
+            (self.get(c).display_name if self.get(c) else c)
+            for c in self.supported_languages
+        ) or "configured languages"
+        trigger_schema = ", ".join(
+            f'"{field}": ["kw"]' for field in self.trigger_fields()
+        ) or '"triggers": ["kw"]'
+        user = template.format(
+            filename=filename,
+            text=text[:2500],
+            language_names=names,
+            trigger_schema=trigger_schema,
+        )
+        return system, user
+
+    def expansion_field(self) -> str:
+        return str(
+            self.concept_extraction.get("expansion_field")
+            or _DEFAULT_CONCEPT_EXTRACTION["expansion_field"]
+        )
 
     def ensure_workspace_defaults(self) -> Path:
         """Write default packs to workspace if missing (demo / local runs)."""

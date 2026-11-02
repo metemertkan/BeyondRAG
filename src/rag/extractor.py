@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Protocol, Sequence, Tuple
 
@@ -28,6 +29,10 @@ from pypdf import PdfReader
 from src.rag.models import ParsedBlock, ParsedDocument
 
 logger = logging.getLogger(__name__)
+
+
+class ParserDegradedError(RuntimeError):
+    """Raised when layout-aware parse fails and degraded fallback is not allowed."""
 
 try:
     import pdfplumber
@@ -379,12 +384,31 @@ class ExcelDocumentParser:
         )
 
 
-class DocumentParserRegistry:
-    """Registry coordinating format-specific document parsers."""
+def _env_allow_degraded(default: bool = True) -> bool:
+    raw = os.getenv("RAG_PARSER_ALLOW_DEGRADED", "true" if default else "false")
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
 
-    def __init__(self, *, prefer_layout_aware: bool = True) -> None:
+
+class DocumentParserRegistry:
+    """Registry coordinating format-specific document parsers.
+
+    When the layout-aware PDF parser fails at runtime, behaviour is controlled by
+    ``allow_degraded`` / ``RAG_PARSER_ALLOW_DEGRADED``:
+      - True (default): WARNING + reason, fall back to PyPDF, mark ``parser_degraded``.
+      - False: WARNING + reason, raise ``ParserDegradedError`` (fail-loud).
+    """
+
+    def __init__(
+        self,
+        *,
+        prefer_layout_aware: bool = True,
+        allow_degraded: Optional[bool] = None,
+    ) -> None:
         self._parsers: List[DocumentParser] = []
         self._prefer_layout_aware = prefer_layout_aware
+        self._allow_degraded = (
+            _env_allow_degraded(default=True) if allow_degraded is None else bool(allow_degraded)
+        )
         # Text formats first for extension clarity; PDF adapters next.
         self.register(PlainTextDocumentParser())
         if prefer_layout_aware and _PDFPLUMBER_AVAILABLE:
@@ -392,6 +416,10 @@ class DocumentParserRegistry:
         self.register(PyPdfDocumentParser())
         # Excel stub is intentionally NOT auto-registered for upload safety;
         # callers may ``register(ExcelDocumentParser())`` without port changes.
+
+    @property
+    def allow_degraded(self) -> bool:
+        return self._allow_degraded
 
     def register(self, parser: DocumentParser) -> None:
         self._parsers.insert(0, parser)
@@ -418,6 +446,12 @@ class DocumentParserRegistry:
                 return parser
         raise RuntimeError("No PDF parser registered in DocumentParserRegistry.")
 
+    def _pypdf_parser(self) -> Optional[PyPdfDocumentParser]:
+        for parser in self._parsers:
+            if isinstance(parser, PyPdfDocumentParser):
+                return parser
+        return None
+
     def extract_pages(self, filename: str, file_bytes: bytes) -> Tuple[int, List[Tuple[int, str]]]:
         parser = self.get_parser(filename)
         return parser.extract_pages(file_bytes)
@@ -428,12 +462,47 @@ class DocumentParserRegistry:
             try:
                 return parser.extract_document(file_bytes)  # type: ignore[attr-defined]
             except RuntimeError as exc:
-                # Fall back to PyPDF when pdfplumber fails at runtime.
-                if self._prefer_layout_aware:
-                    logger.warning("Layout-aware parse failed (%s); falling back to PyPDF.", exc)
-                    for parser in self._parsers:
-                        if isinstance(parser, PyPdfDocumentParser):
-                            return parser.extract_document(file_bytes)
+                # Layout-aware primary failed — explicit degraded policy, never silent.
+                primary_name = str(getattr(parser, "name", "") or type(parser).__name__).lower()
+                is_layout_primary = (
+                    self._prefer_layout_aware
+                    and (
+                        isinstance(parser, PdfPlumberDocumentParser)
+                        or primary_name == "pdfplumber"
+                        or "plumber" in primary_name
+                        or "layout" in primary_name
+                    )
+                )
+                if is_layout_primary:
+                    reason = (
+                        f"Layout-aware parse failed ({exc}); "
+                        f"primary={getattr(parser, 'name', type(parser).__name__)}"
+                    )
+                    fallback = self._pypdf_parser()
+                    if not self._allow_degraded:
+                        logger.warning(
+                            "%s; degraded fallback disabled (RAG_PARSER_ALLOW_DEGRADED=false).",
+                            reason,
+                        )
+                        raise ParserDegradedError(
+                            f"{reason}. Set RAG_PARSER_ALLOW_DEGRADED=true to permit PyPDF fallback."
+                        ) from exc
+                    if fallback is None:
+                        logger.warning("%s; no PyPDF fallback registered.", reason)
+                        raise
+                    logger.warning(
+                        "%s; falling back to PyPDF (degraded, allow_degraded=true).",
+                        reason,
+                    )
+                    degraded = fallback.extract_document(file_bytes)
+                    return ParsedDocument(
+                        page_count=degraded.page_count,
+                        pages=list(degraded.pages),
+                        blocks=list(degraded.blocks),
+                        parser_name=getattr(fallback, "name", "pypdf"),
+                        parser_degraded=True,
+                        parser_fallback_reason=reason,
+                    )
                 raise
         total, pages = parser.extract_pages(file_bytes)
         blocks = [
