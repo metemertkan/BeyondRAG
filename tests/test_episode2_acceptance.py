@@ -337,12 +337,30 @@ def test_layout_aware_parser_keeps_multicolumn_markers_intact():
         pytest.skip("Layout-aware PDF parser adapter not registered yet")
 
     registry = DocumentParserRegistry()
-    _, page_texts = registry.extract_pages(MULTICOL.name, MULTICOL.read_bytes())
+    raw = MULTICOL.read_bytes()
+    _, page_texts = registry.extract_pages(MULTICOL.name, raw)
     blob = "\n".join(t for _, t in page_texts)
     assert "TOKEN_LEFT_COLUMN_ALPHA" in blob
     assert "TOKEN_RIGHT_COLUMN_BETA" in blob
     # Avoid character-level interleave of the two markers
     assert "TOKEN_LEFT_COLUMN_ALPHATOKEN_RIGHT" not in blob.replace(" ", "")
+    # Reading order: left column content before right (not line-interleaved).
+    left_idx = blob.find("TOKEN_LEFT_COLUMN_ALPHA")
+    right_idx = blob.find("TOKEN_RIGHT_COLUMN_BETA")
+    assert 0 <= left_idx < right_idx
+
+    parser = registry.get_parser(MULTICOL.name)
+    if hasattr(parser, "extract_blocks"):
+        blocks = parser.extract_blocks(raw)  # type: ignore[attr-defined]
+        cols = [b for b in blocks if isinstance(b, dict) and str(b.get("block_type")) == "column"]
+        assert len(cols) >= 2
+        assert cols[0].get("metadata", {}).get("column") == "left" or "TOKEN_LEFT_COLUMN_ALPHA" in str(
+            cols[0].get("text", "")
+        )
+        assert "TOKEN_LEFT_COLUMN_ALPHA" in str(cols[0].get("text", ""))
+        assert "TOKEN_RIGHT_COLUMN_BETA" in str(cols[1].get("text", ""))
+        assert "TOKEN_RIGHT_COLUMN_BETA" not in str(cols[0].get("text", ""))
+        assert "TOKEN_LEFT_COLUMN_ALPHA" not in str(cols[1].get("text", ""))
 
 
 @pytest.mark.ep2

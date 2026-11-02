@@ -227,13 +227,27 @@ class DocumentRepository:
             ]
             self.es_manager.memory_chunks.extend(chunks)
 
-    def list_documents(self, *, include_superseded: bool = False) -> List[Dict[str, Any]]:
-        """Return documents from the durable registry (preferred) or indexed chunks."""
+    def list_documents(self, *, include_superseded: bool = True) -> List[Dict[str, Any]]:
+        """Return documents from the durable registry (preferred) or indexed chunks.
+
+        Default includes SUPERSEDED so the dashboard can show retained prior versions
+        (they remain excluded from retrieval via ``is_current`` / status filters).
+        """
         if self._doc_states:
             if include_superseded:
-                reports = self.list_registry_documents(current_only=False)
+                reports = [
+                    r
+                    for r in self.list_registry_documents(current_only=False)
+                    if r.status
+                    in {
+                        IngestionState.INDEXED,
+                        IngestionState.SUPERSEDED,
+                        IngestionState.FAILED,
+                        IngestionState.PENDING,
+                        IngestionState.PROCESSING,
+                    }
+                ]
             else:
-                # Default UI list: current INDEXED (+ FAILED for quarantine visibility)
                 reports = [
                     r
                     for r in self.list_registry_documents(current_only=False)

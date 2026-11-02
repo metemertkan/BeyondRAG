@@ -89,11 +89,18 @@ async def health_check() -> Dict[str, Any]:
 
 
 @app.get("/api/documents")
-async def get_documents() -> Dict[str, Any]:
-    """List all indexed PDF documents and their RBAC tags."""
+async def get_documents(include_superseded: bool = True) -> Dict[str, Any]:
+    """List knowledge-base documents and their RBAC tags / lifecycle status.
+
+    SUPERSEDED versions are included by default so the dashboard can show retained
+    prior revisions (they remain excluded from retrieval).
+    """
     kb = get_kb_service()
+    docs = kb.list_documents()
+    if not include_superseded:
+        docs = [d for d in docs if d.get("status") != "SUPERSEDED" and d.get("is_current", True)]
     return {
-        "documents": kb.list_documents(),
+        "documents": docs,
         "available_tags": kb.list_available_tags(),
     }
 

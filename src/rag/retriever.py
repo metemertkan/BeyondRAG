@@ -136,6 +136,10 @@ class HybridRetriever:
                         "is_public": bool(src.get("is_public", len(visible_tags) == 0)),
                         "tags": visible_tags,
                         "score": round(float(hit.get("_score") or 0.0), 4),
+                        "block_type": src.get("block_type"),
+                        "source_key": src.get("source_key"),
+                        "doc_version": src.get("doc_version"),
+                        "ingestion_status": src.get("ingestion_status"),
                     }
                 )
 

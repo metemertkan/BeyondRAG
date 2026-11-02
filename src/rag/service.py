@@ -201,8 +201,13 @@ class RBACKnowledgeBaseService:
             source_key=source_key,
         )
 
-    def list_documents(self) -> List[Dict[str, Any]]:
-        return self._repository.list_documents()
+    def list_documents(self, *, include_superseded: bool = True) -> List[Dict[str, Any]]:
+        if hasattr(self._repository, "list_documents"):
+            try:
+                return self._repository.list_documents(include_superseded=include_superseded)  # type: ignore[call-arg]
+            except TypeError:
+                return self._repository.list_documents()
+        return []
 
     def list_available_tags(self) -> List[str]:
         return collect_available_tags(self.list_documents())

@@ -83,18 +83,25 @@ def _cluster_columns(
     words: List[Dict[str, object]],
     page_width: float,
 ) -> List[ParsedBlock]:
-    """Split mid-page word streams into left/right column reading order when clear."""
+    """Split mid-page word streams into left-then-right column reading order when clear.
+
+    Uses word ``x0`` vs page midpoint (not ``x1``), so long lines that visually
+    cross the gutter still assign to the column they start in. Requires clearly
+    separated column centroids so dense single-column pages stay intact.
+    """
     if len(words) < 8 or page_width <= 0:
         return []
     mid = page_width / 2.0
-    left = [w for w in words if float(w.get("x0", 0) or 0) < mid - 12]
-    right = [w for w in words if float(w.get("x0", 0) or 0) >= mid - 12]
+    left = [w for w in words if float(w.get("x0", 0) or 0) < mid]
+    right = [w for w in words if float(w.get("x0", 0) or 0) >= mid]
     if len(left) < 3 or len(right) < 3:
         return []
-    # Require a gap between column centroids so dense single-column pages stay intact.
-    left_max = max(float(w.get("x1", 0) or 0) for w in left)
-    right_min = min(float(w.get("x0", 0) or 0) for w in right)
-    if right_min - left_max < 8:
+    left_cx = sum(float(w.get("x0", 0) or 0) for w in left) / len(left)
+    right_cx = sum(float(w.get("x0", 0) or 0) for w in right) / len(right)
+    # Centroids must sit on opposite sides of mid with meaningful separation.
+    if not (left_cx < mid - 20 and right_cx > mid + 20):
+        return []
+    if (right_cx - left_cx) < page_width * 0.18:
         return []
 
     def _words_to_text(group: List[Dict[str, object]]) -> str:
@@ -126,7 +133,7 @@ def _cluster_columns(
                 block_type="column",
                 text=left_text,
                 page_number=0,  # filled by caller
-                metadata={"column": "left"},
+                metadata={"column": "left", "order": 0},
             )
         )
     if right_text:
@@ -135,7 +142,7 @@ def _cluster_columns(
                 block_type="column",
                 text=right_text,
                 page_number=0,
-                metadata={"column": "right"},
+                metadata={"column": "right", "order": 1},
             )
         )
     return blocks

@@ -40,6 +40,14 @@
 - Invented benchmark numbers
 - **ZH query → EN table cell end-to-end retrieval demo:** **explicitly unclaimed this episode.** Language packs + JA detect are tested; a live ZH→EN table-cell retrieval under Finance + bge-m3 is not covered by a dedicated acceptance test (would need a live embedding model or a canned expansion that overclaims). Do not show it in Short/Hashnode as shipped proof.
 - **v1 liquidity fixture alone does not prove “flat missed the number”** — on `policy_v1_liquidity_table.pdf` PyPDF still contains `450,000,000`. Use `policy_mispaired_limits_table.pdf` for the Short flattened→wrong-association beat.
+- **Live Elasticsearch SUPERSEDED integration test:** not run in CI (no ES in unit env). Mapping fields + memory-filter tests ship; **docker-compose smoke** documented in README Episode 2 section.
+
+## Dashboard / API (Short demo)
+
+- Upload accepts `.pdf` / `.md` / `.txt`; optional `source_key` form field (UI + API).
+- Document list shows lifecycle badges (`PENDING`/`PROCESSING`/`INDEXED`/`SUPERSEDED`/`FAILED`); SUPERSEDED rows remain visible.
+- Chat citations surface `block_type` (+ page) when present on authorized chunks.
+- Ollama / `remote_api` / Google embeddings **refuse silent pad/truncate** on native dimension mismatch (`EmbeddingManifestMismatchError`).
 
 ## Short fixture guidance (Manager / Shorts)
 

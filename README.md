@@ -147,7 +147,9 @@ docker compose up -d --build
 pytest tests/ -v
 ```
 
-Suggested walkthrough: ingest `tests/fixtures/pdfs/policy_v1_liquidity_table.pdf` with tag `finance` → retry same bytes → compare flat PyPDF vs pdfplumber cell retention → ingest `policy_v2_liquidity_table.pdf` with the same `source_key` → confirm v1 `SUPERSEDED` / search shows `HKD 520,000,000` only → optional ZH finance query under bge-m3 → force manifest mismatch to observe fail-fast.
+Suggested walkthrough: ingest `tests/fixtures/pdfs/policy_mispaired_limits_table.pdf` (flat mis-pair demo) or `policy_v1_liquidity_table.pdf` with tag `finance` and optional `source_key` in the UI → retry same bytes → compare flat PyPDF neighbor mis-pair vs pdfplumber row → ingest `policy_v2_liquidity_table.pdf` with the **same** `source_key` (filenames may differ) → confirm v1 stays listed as `SUPERSEDED` while search returns `HKD 520,000,000` only → force manifest mismatch to observe fail-fast.
+
+**ES soft-supersede smoke (docker compose):** after `docker compose up -d --build`, upload v1 then v2 with the same `source_key`. Confirm `_search` with `term: { ingestion_status: SUPERSEDED }` finds v1 chunks, and hybrid chat under Finance does **not** cite `HKD 450,000,000`. Index mapping declares `source_key`, `is_current`, `ingestion_status`, `block_type` (see `es_client.py`).
 
 ### Parser trade-offs (short)
 

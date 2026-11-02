@@ -70,6 +70,16 @@ class ElasticsearchIndexManager:
                         "is_public": {"type": "boolean"},
                         "acl_tags": {"type": "keyword"},
                         "uploaded_at": {"type": "keyword"},
+                        # Episode 2 versioning / structure fields (explicit so ES filters work).
+                        "source_key": {"type": "keyword"},
+                        "content_hash": {"type": "keyword"},
+                        "doc_version": {"type": "integer"},
+                        "tenant": {"type": "keyword"},
+                        "is_current": {"type": "boolean"},
+                        "ingestion_status": {"type": "keyword"},
+                        "block_type": {"type": "keyword"},
+                        "embedding_manifest": {"type": "keyword"},
+                        "parser_name": {"type": "keyword"},
                         "embedding": {
                             "type": "dense_vector",
                             "dims": self.dimensions,

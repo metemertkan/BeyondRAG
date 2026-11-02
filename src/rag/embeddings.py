@@ -270,12 +270,15 @@ class OllamaEmbeddingProvider:
             normalized: List[List[float]] = []
             for vec in raw_embeddings:
                 if len(vec) != self._dimensions:
-                    if len(vec) > self._dimensions:
-                        vec = vec[: self._dimensions]
-                    else:
-                        vec = vec + [0.0] * (self._dimensions - len(vec))
+                    raise EmbeddingManifestMismatchError(
+                        f"Ollama model '{self.model_name}' returned native embedding length "
+                        f"{len(vec)} but manifest declares dimensions={self._dimensions}. "
+                        "Refusing silent pad/truncate — reconfigure RAG_EMBEDDING_DIMS or the model."
+                    )
                 normalized.append(normalize_l2(vec))
             return normalized
+        except EmbeddingManifestMismatchError:
+            raise
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to embed documents with Ollama model '{self.model_name}': {exc}"
@@ -364,10 +367,11 @@ class RemoteApiEmbeddingProvider:
             for entry in sorted(entries, key=lambda e: int(e.get("index", 0))):
                 vals = list(entry.get("embedding") or [])
                 if len(vals) != self._dimensions:
-                    if len(vals) > self._dimensions:
-                        vals = vals[: self._dimensions]
-                    else:
-                        vals = vals + [0.0] * (self._dimensions - len(vals))
+                    raise EmbeddingManifestMismatchError(
+                        f"Remote API model '{self.model_name}' returned native embedding length "
+                        f"{len(vals)} but manifest declares dimensions={self._dimensions}. "
+                        "Refusing silent pad/truncate — reconfigure RAG_EMBEDDING_DIMS or the model."
+                    )
                 vectors.append(normalize_l2(vals))
             return vectors
 
@@ -428,10 +432,11 @@ class GoogleEmbeddingProvider:
             for entry in raw_entries:
                 vals = entry.get("values", [])
                 if len(vals) != self._dimensions:
-                    if len(vals) > self._dimensions:
-                        vals = vals[: self._dimensions]
-                    else:
-                        vals = vals + [0.0] * (self._dimensions - len(vals))
+                    raise EmbeddingManifestMismatchError(
+                        f"Google model '{self.model_name}' returned native embedding length "
+                        f"{len(vals)} but manifest declares dimensions={self._dimensions}. "
+                        "Refusing silent pad/truncate."
+                    )
                 vectors.append(normalize_l2(vals))
             return vectors
 
