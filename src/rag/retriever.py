@@ -73,6 +73,16 @@ class HybridRetriever:
         authorized_chunks: List[Dict[str, Any]] = []
         masked_restricted_docs: List[Dict[str, Any]] = []
 
+        # Exclude soft-superseded / non-current versions from retrieval.
+        current_only_filter = {
+            "bool": {
+                "must_not": [
+                    {"term": {"is_current": False}},
+                    {"term": {"ingestion_status": "SUPERSEDED"}},
+                ]
+            }
+        }
+
         if self.es_manager.is_online():
             self.es_manager.ensure_index()
             resp = self.es_manager.client.search(
@@ -99,7 +109,7 @@ class HybridRetriever:
                                 }
                             },
                         ],
-                        "filter": [acl_filter_clause],
+                        "filter": [acl_filter_clause, current_only_filter],
                     }
                 },
                 knn={
@@ -107,7 +117,7 @@ class HybridRetriever:
                     "query_vector": query_vector,
                     "k": effective_top_k,
                     "num_candidates": max(20, effective_top_k * profile.num_candidates_multiplier),
-                    "filter": acl_filter_clause,
+                    "filter": [acl_filter_clause, current_only_filter],
                 },
             )
             elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
@@ -126,6 +136,10 @@ class HybridRetriever:
                         "is_public": bool(src.get("is_public", len(visible_tags) == 0)),
                         "tags": visible_tags,
                         "score": round(float(hit.get("_score") or 0.0), 4),
+                        "block_type": src.get("block_type"),
+                        "source_key": src.get("source_key"),
+                        "doc_version": src.get("doc_version"),
+                        "ingestion_status": src.get("ingestion_status"),
                     }
                 )
 
@@ -172,6 +186,11 @@ class HybridRetriever:
                 )
         else:
             for rec in self.es_manager.memory_chunks:
+                # Soft-superseded versions stay in storage but are excluded from retrieval.
+                if rec.get("is_current") is False:
+                    continue
+                if rec.get("ingestion_status") == "SUPERSEDED":
+                    continue
                 rec_tags = set(rec.get("acl_tags", [PUBLIC_SENTINEL_TAG]))
                 if rec_tags.intersection(effective_acl_tags):
                     score = sum(a * b for a, b in zip(query_vector, rec["embedding"]))
@@ -186,6 +205,9 @@ class HybridRetriever:
                             "is_public": bool(rec.get("is_public", len(visible_tags) == 0)),
                             "tags": visible_tags,
                             "score": round(float(score), 4),
+                            "block_type": rec.get("block_type"),
+                            "source_key": rec.get("source_key"),
+                            "doc_version": rec.get("doc_version"),
                         }
                     )
             authorized_chunks.sort(key=lambda c: c["score"], reverse=True)

@@ -100,9 +100,11 @@ BeyondRAG/
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `RAG_EMBEDDING_PROVIDER` | `feature_hash` | Active embedding provider: `feature_hash`, `ollama`, `google`, or `fake`. |
-| `RAG_EMBEDDING_DIMS` | `256` | Vector dimensions for Elasticsearch dense_vector indexing. |
-| `RAG_EMBEDDING_MODEL` | `bge-m3` | Embedding model identifier when using `ollama` or `google`. |
+| `RAG_EMBEDDING_PROVIDER` | `feature_hash` | Active embedding provider: `feature_hash`, `ollama`, `remote_api`, `google`, or `fake`. **Forwarded into the app container** by `docker-compose.yml` (`${RAG_EMBEDDING_PROVIDER:-feature_hash}`). Copy `.env.example` → `.env` so Compose interpolates host values. |
+| `RAG_EMBEDDING_DIMS` | `256` | Vector dimensions for Elasticsearch dense_vector indexing. Forwarded by Compose. |
+| `RAG_EMBEDDING_MODEL` | `bge-m3` | Embedding model when using `ollama`, `remote_api`, or `google`. Forwarded by Compose. |
+| `RAG_EMBEDDING_API_KEY` | _(empty)_ | API key for `remote_api` (OpenAI-compatible). Alias: `OPENAI_API_KEY`. Forwarded by Compose. |
+| `RAG_EMBEDDING_API_BASE` | `https://api.openai.com/v1` | Base URL for `remote_api` embeddings. Forwarded by Compose. |
 | `RAG_CHUNKING_STRATEGY` | `sliding_window` | Active chunking algorithm: `sliding_window`, `paragraph`, `sentence`, `recursive`. |
 | `RAG_CHUNK_MAX_TOKENS` | `500` | Maximum token/character limit per chunk. |
 | `RAG_CHUNK_OVERLAP_TOKENS`| `80` | Overlap budget between consecutive chunks. |
@@ -122,7 +124,45 @@ pytest tests/ -v
 
 ---
 
+## Episode 2 — Production Document Ingestion (feature branch)
+
+**Branch:** `cursor/episode-2-ingestion-b42f` (checkout this branch to run Episode 2 locally).  
+**What shipped notes:** [`WHAT_SHIPPED.md`](./WHAT_SHIPPED.md)
+
+Episode 2 adds trustworthy ingestion on top of Episode 1 RBAC + cross-lingual retrieval:
+
+1. **Soft versioning:** stable `source_key` (`{tenant}:{filename}`) + per-bytes `doc_id` / content hash. Revised bytes mark the prior version `SUPERSEDED` (retained, excluded from retrieval).
+2. **Layout-aware PDF parsing:** primary adapter **pdfplumber** (tables as markdown rows, multi-column reading order). Offline Docker fallback: **PyPDF**. Structured fixtures under `tests/fixtures/pdfs/`.
+3. **Embedding contract at ingest:** Ollama `bge-m3`, OpenAI-compatible remote API (`RAG_EMBEDDING_API_KEY`), and deterministic `feature_hash` for CI. Manifest mismatch fails fast.
+4. **Durable registry:** `workspace/document_registry.json`.
+5. **Uploads:** `.pdf`, `.md`, `.txt` via `/api/upload`. Excel deferred; parser registry stays pluggable.
+6. **Languages:** config/data-driven packs (`workspace/language_packs.json`); EN/ZH are default data, not hardcoded product limits.
+
+### Demo path (sandbox)
+
+```bash
+git checkout cursor/episode-2-ingestion-b42f
+docker compose up -d --build
+# UI: http://localhost:8090
+pytest tests/ -v
+```
+
+Suggested walkthrough: ingest `tests/fixtures/pdfs/policy_mispaired_limits_table.pdf` (flat mis-pair demo) or `policy_v1_liquidity_table.pdf` with tag `finance` and optional `source_key` in the UI → retry same bytes → compare flat PyPDF neighbor mis-pair vs pdfplumber row → ingest `policy_v2_liquidity_table.pdf` with the **same** `source_key` (filenames may differ) → confirm v1 stays listed as `SUPERSEDED` while search returns `HKD 520,000,000` only → force manifest mismatch to observe fail-fast.
+
+**ES soft-supersede smoke (docker compose):** after `docker compose up -d --build`, upload v1 then v2 with the same `source_key`. Confirm `_search` with `term: { ingestion_status: SUPERSEDED }` finds v1 chunks, and hybrid chat under Finance does **not** cite `HKD 450,000,000`. Index mapping declares `source_key`, `is_current`, `ingestion_status`, `block_type` (see `es_client.py`).
+
+### Parser trade-offs (short)
+
+| Option | Why / why not |
+| --- | --- |
+| **pdfplumber (primary)** | MIT-friendly, table + layout extraction, modest image size, offline once installed |
+| **PyPDF (fallback)** | Tiny; keeps Docker boot working if pdfplumber is unavailable; flattens tables |
+| Docling | Strong fidelity but heavier ML/image deps — deferred for sandbox size |
+| PyMuPDF | Capable/fast; AGPL licensing friction for some deployments — deferred |
+
+---
+
 ## *Beyond a PoC* Series Roadmap
 
 - [x] **Episode #01 (`BeyondRAG`):** Access Management (RBAC Pre-Filtering) & Dynamic LLM Cross-Language (`ZH ↔ EN`) Retrieval in Elasticsearch 8.15
-- [ ] **Episode #02 (Up Next):** Deep Dive into Production Document Ingestion & Multilingual Dense Embeddings (`bge-m3`, Layout-Aware Parsing & Tables)
+- [ ] **Episode #02 (In progress on `cursor/episode-2-ingestion-b42f`):** Production document ingestion — soft supersession, layout-aware parsing & tables, `bge-m3` embedding contract

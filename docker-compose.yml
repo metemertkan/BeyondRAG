@@ -7,14 +7,24 @@ services:
     restart: unless-stopped
     ports:
       - "8090:8090"
+    # Compose loads project `.env` for ${VAR} interpolation (copy from .env.example).
+    # Explicit entries below forward RAG_EMBEDDING_* into the app container.
     environment:
-      - WEB_HOST=0.0.0.0
-      - WEB_PORT=8090
+      - WEB_HOST=${WEB_HOST:-0.0.0.0}
+      - WEB_PORT=${WEB_PORT:-8090}
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:1.5b}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - USE_LOCAL_ONLY=${USE_LOCAL_ONLY:-false}
+      - RAG_EMBEDDING_PROVIDER=${RAG_EMBEDDING_PROVIDER:-feature_hash}
+      - RAG_EMBEDDING_DIMS=${RAG_EMBEDDING_DIMS:-256}
+      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-bge-m3}
+      - RAG_EMBEDDING_API_KEY=${RAG_EMBEDDING_API_KEY:-}
+      - RAG_EMBEDDING_API_BASE=${RAG_EMBEDDING_API_BASE:-https://api.openai.com/v1}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - RAG_CORPUS_LANGUAGE=${RAG_CORPUS_LANGUAGE:-en}
+      - RAG_LANGUAGE_PACKS_PATH=${RAG_LANGUAGE_PACKS_PATH:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

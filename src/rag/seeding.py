@@ -23,6 +23,8 @@ class _SeedTarget(Protocol):
         pdf_bytes: bytes,
         tags: List[str] | str | None = None,
         doc_id: str | None = None,
+        tenant: str | None = None,
+        source_key: str | None = None,
     ) -> Dict[str, Any]:
         ...
 

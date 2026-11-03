@@ -2,14 +2,16 @@
 
 Defines the hexagonal boundary interfaces between the domain layer (`service.py`,
 `ingestor.py`, `acl.py`, `chunker.py`) and infrastructure adapters (Elasticsearch,
-Ollama, Gemini, PyPDF, ReportLab). Contains zero external library dependencies.
+Ollama, Gemini, pdfplumber, PyPDF, ReportLab). Contains zero external library dependencies.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Protocol, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple
+
+from src.rag.models import IngestionReport, ParsedDocument
 
 
 @dataclass(frozen=True)
@@ -47,9 +49,21 @@ class PdfTextExtractorPort(Protocol):
 
 
 class DocumentParserPort(Protocol):
-    """Port 2b: Pluggable document parser supporting multiple formats."""
+    """Port 2b: Pluggable document parser supporting multiple formats.
+
+    Implementations may also expose ``extract_document`` returning a
+    :class:`ParsedDocument` with structure-preserving blocks (tables, columns).
+    Excel (.xlsx) adapters can register later without changing this port.
+    """
 
     def extract_pages(self, filename: str, file_bytes: bytes) -> Tuple[int, List[Tuple[int, str]]]:
+        ...
+
+
+class StructuredDocumentParserPort(DocumentParserPort, Protocol):
+    """Optional richer parse path used when structure metadata is available."""
+
+    def extract_document(self, filename: str, file_bytes: bytes) -> ParsedDocument:
         ...
 
 
@@ -97,8 +111,33 @@ class DocumentRepositoryPort(Protocol):
         ...
 
 
+class DocumentRegistryPort(Protocol):
+    """Durable document registry for lifecycle + version tracking."""
+
+    def get_document_state(self, doc_id: str) -> Optional[IngestionReport]:
+        ...
+
+    def set_document_state(self, report: IngestionReport) -> None:
+        ...
+
+    def get_current_doc_id(self, source_key: str) -> Optional[str]:
+        ...
+
+    def mark_superseded(self, doc_id: str) -> None:
+        ...
+
+    def get_index_embedding_manifest(self) -> Optional[str]:
+        ...
+
+    def set_index_embedding_manifest(self, manifest_id: str) -> None:
+        ...
+
+    def list_registry_documents(self, *, current_only: bool = False) -> List[IngestionReport]:
+        ...
+
+
 class PdfIngestorPort(Protocol):
-    """Port 6: End-to-end PDF ingestion pipeline."""
+    """Port 6: End-to-end document ingestion pipeline."""
 
     def ingest(
         self,
@@ -106,12 +145,18 @@ class PdfIngestorPort(Protocol):
         pdf_bytes: bytes,
         tags: List[str] | str | None = None,
         doc_id: str | None = None,
+        tenant: str | None = None,
+        source_key: str | None = None,
     ) -> Dict[str, Any]:
         ...
 
 
 class CrossLingualPort(Protocol):
-    """Port 7: Cross-lingual (EN <-> ZH) query handling & concept extraction."""
+    """Port 7: Cross-lingual query handling & concept extraction.
+
+    Language-agnostic at the port boundary — adapters may add languages
+    without changing callers.
+    """
 
     def is_cross_lingual(self, text: str) -> bool:
         ...

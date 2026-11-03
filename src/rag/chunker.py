@@ -18,6 +18,7 @@ from enum import Enum
 from typing import Any, Callable, Dict, Final, List, Optional, Protocol
 
 _SENTENCE_SPLIT_RE: Final[re.Pattern[str]] = re.compile(r"(?<=[.!?。！？])\s+")
+# Unicode CJK Unified Ideographs range — script/tokenization only (not a language pack).
 _CJK_CHAR_RE: Final[re.Pattern[str]] = re.compile(r"[\u4e00-\uffff]")
 
 
@@ -40,9 +41,9 @@ class TokenizerProtocol(Protocol):
 
 class HeuristicTokenizer:
     """Fast, dependency-free multilingual tokenizer.
-    
-    Treats CJK characters as individual tokens and latin words / punctuation as tokens.
-    Provides accurate token estimates for both Western and Eastern languages.
+
+    Splits ideographic (CJK Unified) codepoints as single tokens; latin words /
+    punctuation otherwise. Script-range behaviour only — not pack-language aware.
     """
 
     def count_tokens(self, text: str) -> int:
