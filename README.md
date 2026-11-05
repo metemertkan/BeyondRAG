@@ -96,7 +96,7 @@ BeyondRAG/
 │           └── index.html    # 2-Section Web UI (PDF Upload & KB List + Multi-Lingual Chat)
 ├── tests/                    # Unit, acceptance and live-Elasticsearch tests
 ├── eval/                     # Golden dataset, thresholds and evaluation corpus
-├── .github/workflows/        # rag-eval.yml: LLM-as-a-judge gate after every merge
+├── .github/workflows/        # rag-eval.yml: manual LLM-as-a-judge gate on a self-hosted runner
 └── workspace/
     ├── dynamic_concepts.json # Persisted concept mappings
     └── uploads/              # Persistent storage for uploaded & seeded PDFs
@@ -148,7 +148,7 @@ Getting a clean demo out of a RAG pipeline is easy. Keeping it correct when the 
 | **Semantic chunking** | Fixed windows cut across topics; pure semantic chunking is slow and fragments long sections | Topic boundaries from sentence-embedding similarity, 15% sliding overlap, minimum and maximum chunk size, and a router that sends uniform documents to cheap fixed-size chunking | `chunker.py` |
 | **Versioning and ground-truth decay** | Old and new facts compete; the LLM blends them | Soft `SUPERSEDED` versions, expiry dates, trust tiers that re-rank results, numeric conflict detection, and a precedence prompt that makes the model declare contradictions | `ingestor.py`, `governance.py`, `retriever.py`, `synthesizer.py` |
 | **GDPR and deletions** | Deleting a file leaves chunks, old versions, vectors, tables and derived concepts behind | `source_key` and `subject_ids` lineage on every chunk, dry-run plans, purge of every store, re-scan verification, tombstones against re-sync resurrection, keyed-hash audit log, source-system delete and archive events | `erasure.py`, `repository.py` |
-| **Continuous evaluation** | Retrieval quality degrades silently | A golden dataset run on every merge, scored by an LLM judge on Context Precision and Faithfulness, plus deterministic checks that retired facts stay out of the context | `src/eval/`, `.github/workflows/rag-eval.yml` |
+| **Continuous evaluation** | Retrieval quality degrades silently | A golden dataset, run on demand and scored by a local LLM judge on Context Precision and Faithfulness, plus deterministic checks that retired facts stay out of the context | `src/eval/`, `.github/workflows/rag-eval.yml` |
 
 ### Try it
 
@@ -171,15 +171,17 @@ Regenerate the measurements behind the episode visuals with `python scripts/ep2_
 
 ### Continuous evaluation
 
-[`.github/workflows/rag-eval.yml`](./.github/workflows/rag-eval.yml) runs after every merge to `main`. Add a `GOOGLE_API_KEY` repository secret to enable it. The floors live in [`eval/golden_dataset.json`](./eval/golden_dataset.json).
+This is a demonstration gate: the judge is local Ollama (`qwen3:8b`), which can misjudge an answer and is slow on CPU. The floors live in [`eval/golden_dataset.json`](./eval/golden_dataset.json).
 
 ```bash
 python scripts/run_eval.py                               # exit 0 passed, 1 gate failed, 2 inconclusive
 python scripts/run_eval.py --simulate-drift stale_index  # see the gate catch a regression
-USE_LOCAL_ONLY=true OLLAMA_MODEL=qwen3:8b python scripts/run_eval.py  # local judge, slow on CPU
+RAG_EVAL_OLLAMA_MODEL=<installed model> python scripts/run_eval.py  # use a different judge
 ```
 
-A missing key or an unavailable judge exits 2 and fails the workflow, because a gate that passes without evaluating anything is worse than no gate. The workflow runs after the merge, so it reports a regression but cannot block one. To block merges, also trigger it on `pull_request` and mark the check as required.
+An unavailable judge or missing model exits 2, because a gate that passes without evaluating anything is worse than no gate.
+
+[`.github/workflows/rag-eval.yml`](./.github/workflows/rag-eval.yml) runs the same gate when started by hand from `main`. It needs a self-hosted runner on a machine with uv, Ollama and Elasticsearch, and does not run on merges, so it cannot block a regression. To block merges, also trigger it on `pull_request` and mark the check as required, after reviewing the risk of self-hosted runners on a public repository.
 
 ### Limits worth knowing
 

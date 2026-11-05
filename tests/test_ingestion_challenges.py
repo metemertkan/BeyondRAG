@@ -1108,11 +1108,12 @@ def test_silent_fallback_from_llm_synthesis_is_inconclusive(monkeypatch, tmp_pat
     assert "fell back" in report.failures[0]
 
 
-def test_workflow_runs_gate_after_merge_with_required_secret():
+def test_workflow_runs_gate_manually_on_self_hosted_runner():
     text = (Path(__file__).parents[1] / ".github" / "workflows" / "rag-eval.yml").read_text(encoding="utf-8")
-    assert "branches: [main]" in text
-    assert "secrets.GOOGLE_API_KEY" in text
-    assert "--require-gemini" in text and "--require-elasticsearch" in text
+    assert "workflow_dispatch" in text and "runs-on: self-hosted" in text
+    assert "push:" not in text and "pull_request" not in text
+    assert "secrets." not in text
+    assert "--require-elasticsearch" in text
 
 
 # --- Against a real Elasticsearch ----------------------------------------------
