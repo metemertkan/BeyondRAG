@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from src.rag.erasure import ErasedSourceError
+from src.rag.governance import DocumentGovernance
 from src.rag.service import KB_INDEX_NAME, get_kb_service, normalize_tags
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -69,6 +72,35 @@ class UpdateTagsRequest(BaseModel):
         default_factory=list,
         description="New list of role tags (empty list makes the document PUBLIC).",
     )
+
+
+class ErasureRequest(BaseModel):
+    """Right-to-be-forgotten request. Name a person, or a source, but not both."""
+
+    subject_id: Optional[str] = Field(default=None, description="Person to erase, e.g. an email address.")
+    source_key: Optional[str] = Field(default=None, description="Logical document to erase, with all its versions.")
+    dry_run: bool = Field(default=True, description="Defaults to true: show the plan and delete nothing.")
+    include_detected: bool = Field(
+        default=True,
+        description="Also erase documents where the subject was detected in the text but not declared.",
+    )
+
+
+class SyncEvent(BaseModel):
+    """Webhook payload from a source system (SharePoint, Salesforce, ...)."""
+
+    event_id: str = Field(..., min_length=1)
+    event_type: str = Field(..., description="'deleted' (hard erase) or 'archived' (remove from retrieval).")
+    source_key: str = Field(..., min_length=1)
+
+
+def _require_governance_token(token: Optional[str]) -> None:
+    """Fail closed: destructive endpoints stay off until RAG_GOVERNANCE_TOKEN is set."""
+    expected = os.getenv("RAG_GOVERNANCE_TOKEN", "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="Set RAG_GOVERNANCE_TOKEN to enable this endpoint.")
+    if not token or not hmac.compare_digest(token.encode("utf-8"), expected.encode("utf-8")):
+        raise HTTPException(status_code=401, detail="Invalid governance token.")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -132,7 +164,7 @@ async def get_documents(include_superseded: bool = True) -> Dict[str, Any]:
     }
 
 
-_ALLOWED_UPLOAD_SUFFIXES = {".pdf", ".md", ".markdown", ".txt"}
+_ALLOWED_UPLOAD_SUFFIXES = {".pdf", ".md", ".markdown", ".txt", ".xlsx"}
 
 
 @app.post("/api/upload")
@@ -141,21 +173,22 @@ async def upload_pdf(
     tags: str = Form(default=""),
     tenant: str = Form(default="default"),
     source_key: str = Form(default=""),
+    trust_tier: str = Form(default="unverified"),
+    effective_date: str = Form(default=""),
+    expires_at: str = Form(default=""),
+    business_domain: str = Form(default=""),
+    subject_ids: str = Form(default="", description="Comma-separated people this document is about."),
 ) -> Dict[str, Any]:
-    """Upload a document (PDF, Markdown, or plain text), chunk, and index with RBAC tags.
+    """Upload a document (PDF, Markdown, text, or Excel), chunk, and index with RBAC tags.
 
-    Excel (.xlsx) is intentionally not accepted this episode; the parser registry
-    remains pluggable for a future adapter.
+    Governance fields drive source precedence, expiry and GDPR lineage.
     """
     filename = file.filename or "uploaded_document.pdf"
     suffix = Path(filename).suffix.lower()
     if suffix not in _ALLOWED_UPLOAD_SUFFIXES:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Supported uploads this episode: .pdf, .md, .txt. "
-                "Excel (.xlsx) is deferred; register an adapter later."
-            ),
+            detail="Supported uploads: .pdf, .md, .txt, .xlsx (legacy .xls: re-save as .xlsx first).",
         )
 
     pdf_bytes = await file.read()
@@ -165,13 +198,23 @@ async def upload_pdf(
     parsed_tags = normalize_tags(tags)
     kb = get_kb_service()
     try:
+        governance = DocumentGovernance(
+            trust_tier=trust_tier.strip() or "unverified",
+            effective_date=effective_date.strip() or None,
+            expires_at=expires_at.strip() or None,
+            business_domain=business_domain.strip(),
+            subject_ids=tuple(s for s in subject_ids.split(",") if s.strip()),
+        )
         doc_meta = kb.ingest_pdf_bytes(
             filename=filename,
             pdf_bytes=pdf_bytes,
             tags=parsed_tags,
             tenant=tenant or "default",
             source_key=source_key.strip() or None,
+            governance=governance,
         )
+    except ErasedSourceError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -208,6 +251,53 @@ async def delete_doc(doc_id: str) -> Dict[str, Any]:
         "result": result,
         "available_tags": kb.list_available_tags(),
     }
+
+
+@app.post("/api/erasure")
+async def erase_data(
+    payload: ErasureRequest,
+    background_tasks: BackgroundTasks,
+    x_governance_token: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    """Plan (default) or execute a hard deletion across every store, with verification."""
+    _require_governance_token(x_governance_token)
+    if bool(payload.subject_id) == bool(payload.source_key):
+        raise HTTPException(status_code=422, detail="Provide exactly one of subject_id or source_key.")
+    erasure = get_kb_service().erasure_service()
+    plan = (
+        erasure.plan_subject(payload.subject_id, include_detected=payload.include_detected)
+        if payload.subject_id
+        else erasure.plan_source(payload.source_key)
+    )
+    if payload.dry_run:
+        return {"status": "dry_run", "plan": plan.to_dict()}
+    receipt = erasure.execute(plan)
+    if receipt.soft_deleted_pending:
+        background_tasks.add_task(erasure.confirm_physical_purge, receipt.request_id)
+    return {"status": "erased" if receipt.verified else "incomplete", "receipt": receipt.to_dict()}
+
+
+@app.post("/api/sync/events")
+async def source_sync_event(
+    payload: SyncEvent,
+    background_tasks: BackgroundTasks,
+    x_governance_token: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    """Receive a delete or archive event from a source system. Safe to retry."""
+    _require_governance_token(x_governance_token)
+    kb = get_kb_service()
+    try:
+        result = kb.source_sync_handler().handle(
+            event_id=payload.event_id,
+            event_type=payload.event_type,
+            source_key=payload.source_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    receipt = result.get("receipt") or {}
+    if receipt.get("soft_deleted_pending"):
+        background_tasks.add_task(kb.erasure_service().confirm_physical_purge, receipt["request_id"])
+    return result
 
 
 @app.post("/api/seed")

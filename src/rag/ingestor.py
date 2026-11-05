@@ -8,15 +8,19 @@ Guarantees:
   - Embedding manifest locked at first INDEXED write; mismatch fails fast
   - Structure-preserving chunk metadata (block_type, page_number, parser_name)
   - Immediate cleanup/rollback on parser, embedding, or indexing failure
+  - Lineage and governance on every chunk: source_key, subject_ids, trust tier, dates
+  - Erasure tombstones refuse to re-admit data that a deletion request removed
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
+import re
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Final, List, Optional
 
 from src.rag.acl import resolve_document_acl
 from src.rag.embeddings import (
@@ -26,6 +30,7 @@ from src.rag.embeddings import (
     assert_vector_matches_manifest,
 )
 from src.rag.extractor import ParserDegradedError
+from src.rag.governance import DocumentGovernance, normalize_subject_id
 from src.rag.models import IngestionReport, IngestionState, ParsedBlock, ParsedDocument
 from src.rag.ports import (
     ChunkerPort,
@@ -37,6 +42,14 @@ from src.rag.ports import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Emails are the one identifier found reliably with no NER model. Other identifiers
+# (names, employee IDs) must be declared through ``DocumentGovernance.subject_ids``.
+_EMAIL_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def detect_subject_ids(text: str) -> List[str]:
+    return sorted({normalize_subject_id(match) for match in _EMAIL_RE.findall(text)})
 
 
 def _utc_now() -> str:
@@ -172,23 +185,33 @@ class PdfIngestor:
         manifest: EmbeddingManifest,
         parser_name: str,
         chunks_current: bool = True,
+        governance: DocumentGovernance = DocumentGovernance(),
     ) -> List[Dict[str, Any]]:
         chunk_records: List[Dict[str, Any]] = []
         global_chunk_idx = 0
         units: List[tuple[int, str, str, Dict[str, Any]]] = []
+        effective_date = governance.effective_date or uploaded_at[:10]
+
+        def routed_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+            decision = getattr(self._chunker, "last_decision", None)
+            return {**metadata, "chunking": dict(decision)} if decision else dict(metadata)
 
         if blocks:
             for block in blocks:
-                if block.block_type == "table":
+                if block.block_type in {"table", "table_summary"}:
                     # Keep tables intact as retrieval units (structure-preserving).
                     units.append((block.page_number, block.text, block.block_type, dict(block.metadata)))
                 else:
-                    for piece in self._chunker.split(block.text):
-                        units.append((block.page_number, piece, block.block_type, dict(block.metadata)))
+                    pieces = self._chunker.split(block.text)
+                    metadata = routed_metadata(block.metadata)
+                    for piece in pieces:
+                        units.append((block.page_number, piece, block.block_type, metadata))
         else:
             for page_num, extracted_text in pages:
-                for piece in self._chunker.split(extracted_text):
-                    units.append((page_num, piece, "paragraph", {}))
+                pieces = self._chunker.split(extracted_text)
+                metadata = routed_metadata({})
+                for piece in pieces:
+                    units.append((page_num, piece, "paragraph", metadata))
 
         for page_num, chunk_str, block_type, block_meta in units:
             global_chunk_idx += 1
@@ -218,6 +241,12 @@ class PdfIngestor:
                     "ingestion_status": IngestionState.INDEXED.value,
                     "embedding_manifest": manifest.config_identifier,
                     "parser_name": parser_name,
+                    "trust_tier": governance.trust_tier,
+                    "effective_date": effective_date,
+                    "expires_at": governance.expires_at,
+                    "business_domain": governance.business_domain,
+                    "source_system": governance.source_system,
+                    "subject_ids": sorted(set(governance.subject_ids) | set(detect_subject_ids(chunk_str))),
                     "metadata": {
                         "block_type": block_type,
                         **block_meta,
@@ -234,6 +263,7 @@ class PdfIngestor:
         doc_id: Optional[str] = None,
         tenant: str | None = None,
         source_key: str | None = None,
+        governance: DocumentGovernance | None = None,
     ) -> Dict[str, Any]:
         """Ingest a document with PENDING→PROCESSING lifecycle, versioning, and rollback."""
         if not pdf_bytes:
@@ -248,6 +278,16 @@ class PdfIngestor:
         )
         acl = resolve_document_acl(tags)
         uploaded_at = _utc_now()
+        governance = governance or DocumentGovernance()
+        effective_date = governance.effective_date or uploaded_at[:10]
+
+        # Before any state is written: erased data must not get back in, even as PENDING.
+        if hasattr(self._repository, "assert_not_erased"):
+            self._repository.assert_not_erased(
+                source_key=resolved_source_key,
+                content_hash=digest,
+                subject_ids=governance.subject_ids,
+            )
 
         previous_current_id: Optional[str] = None
         if hasattr(self._repository, "get_current_doc_id"):
@@ -289,29 +329,15 @@ class PdfIngestor:
             supersedes_doc_id=None if same_bytes_retry else previous_current_id,
             embedding_manifest="",
             parser_name=(same_bytes_prior.parser_name if same_bytes_prior else ""),
+            trust_tier=governance.trust_tier,
+            effective_date=effective_date,
+            expires_at=governance.expires_at,
+            business_domain=governance.business_domain,
+            source_system=governance.source_system,
+            subject_ids=list(governance.subject_ids),
         )
         self._set_state(pending_report)
-
-        processing_report = IngestionReport(
-            doc_id=assigned_doc_id,
-            filename=safe_filename,
-            status=IngestionState.PROCESSING,
-            page_count=0,
-            chunk_count=0,
-            is_public=acl.is_public,
-            tags=acl.visible_tags,
-            acl_tags=acl.acl_tags,
-            uploaded_at=uploaded_at,
-            source_key=resolved_source_key,
-            content_hash=digest,
-            doc_version=doc_version,
-            tenant=tenant_norm,
-            is_current=bool(same_bytes_retry),
-            supersedes_doc_id=None if same_bytes_retry else previous_current_id,
-            embedding_manifest="",
-            parser_name=(same_bytes_prior.parser_name if same_bytes_prior else ""),
-        )
-        self._set_state(processing_report)
+        self._set_state(replace(pending_report, status=IngestionState.PROCESSING))
 
         try:
             manifest = _resolve_embedder_manifest(self._embedder)
@@ -351,6 +377,13 @@ class PdfIngestor:
             )
             concept_ids = [c["concept_id"] for c in extracted_concepts]
 
+            # Lineage: every email in the text links this source to that person.
+            detected_subjects = [
+                subject for subject in detect_subject_ids(full_doc_text) if subject not in governance.subject_ids
+            ]
+            if hasattr(self._repository, "assert_not_erased"):
+                self._repository.assert_not_erased(subject_ids=detected_subjects)
+
             # Stage-then-publish: when replacing another version, stage chunks as
             # non-current first so v1 stays the sole searchable current until publish.
             revising = (
@@ -372,6 +405,7 @@ class PdfIngestor:
                 manifest=manifest,
                 parser_name=parsed.parser_name,
                 chunks_current=not revising,
+                governance=governance,
             )
 
             if hasattr(self._repository, "delete_chunks"):
@@ -379,33 +413,33 @@ class PdfIngestor:
             else:
                 self._repository.delete_document(assigned_doc_id)
             self._repository.save_chunks(chunk_records)
+            parsed_tables = list(getattr(parsed, "tables", []) or [])
+            if parsed_tables and hasattr(self._repository, "save_tables"):
+                self._repository.save_tables(
+                    parsed_tables,
+                    doc_id=assigned_doc_id,
+                    source_key=resolved_source_key,
+                    acl_tags=acl.acl_tags,
+                )
 
             if hasattr(self._repository, "set_index_embedding_manifest"):
                 if not self._repository.get_index_embedding_manifest():
                     self._repository.set_index_embedding_manifest(manifest.config_identifier)
 
-            success_report = IngestionReport(
-                doc_id=assigned_doc_id,
-                filename=safe_filename,
+            success_report = replace(
+                pending_report,
                 status=IngestionState.INDEXED,
                 page_count=parsed.page_count,
                 chunk_count=len(chunk_records),
-                is_public=acl.is_public,
-                tags=acl.visible_tags,
-                acl_tags=acl.acl_tags,
-                uploaded_at=uploaded_at,
                 dynamic_concepts=concept_ids,
                 concept_model=concept_model,
-                source_key=resolved_source_key,
-                content_hash=digest,
-                doc_version=doc_version,
-                tenant=tenant_norm,
                 is_current=True,
-                supersedes_doc_id=None if same_bytes_retry else previous_current_id,
                 embedding_manifest=manifest.config_identifier,
                 parser_name=parsed.parser_name,
                 parser_degraded=bool(getattr(parsed, "parser_degraded", False)),
                 parser_fallback_reason=str(getattr(parsed, "parser_fallback_reason", "") or ""),
+                detected_subject_ids=detected_subjects,
+                table_ids=[table.table_id for table in parsed_tables],
             )
 
             # Publish only after v2 chunks are written: INDEXED v2 then flip v1→SUPERSEDED.
@@ -443,6 +477,12 @@ class PdfIngestor:
                 "parser_fallback_reason": str(
                     getattr(parsed, "parser_fallback_reason", "") or ""
                 ),
+                "trust_tier": governance.trust_tier,
+                "effective_date": effective_date,
+                "expires_at": governance.expires_at,
+                "subject_ids": list(governance.subject_ids),
+                "detected_subject_ids": detected_subjects,
+                "table_ids": [table.table_id for table in parsed_tables],
             }
 
         except Exception as exc:
@@ -467,26 +507,12 @@ class PdfIngestor:
             # failed revision leaves the previous current searchable without restore.
             self._repository.delete_document(assigned_doc_id)
 
-            failed_report = IngestionReport(
-                doc_id=assigned_doc_id,
-                filename=safe_filename,
+            failed_report = replace(
+                pending_report,
                 status=IngestionState.FAILED,
-                page_count=0,
-                chunk_count=0,
-                is_public=acl.is_public,
-                tags=acl.visible_tags,
-                acl_tags=acl.acl_tags,
-                uploaded_at=uploaded_at,
                 error_message=str(exc),
-                source_key=resolved_source_key,
-                content_hash=digest,
-                doc_version=doc_version,
-                tenant=tenant_norm,
                 is_current=False,
-                supersedes_doc_id=None if same_bytes_retry else previous_current_id,
-                embedding_manifest=(
-                    manifest.config_identifier if "manifest" in locals() else ""
-                ),
+                embedding_manifest=(manifest.config_identifier if "manifest" in locals() else ""),
             )
             self._set_state(failed_report)
 

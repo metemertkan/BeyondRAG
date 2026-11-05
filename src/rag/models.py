@@ -14,6 +14,7 @@ class IngestionState(str, Enum):
     PROCESSING covers extract → embed → index work.
     INDEXED is the searchable current version.
     SUPERSEDED retains prior bytes/chunks but excludes them from retrieval.
+    ARCHIVED follows a source-system archive event: retained, excluded from retrieval.
     FAILED is a terminal quarantine state after rollback.
     """
 
@@ -21,6 +22,7 @@ class IngestionState(str, Enum):
     PROCESSING = "PROCESSING"
     INDEXED = "INDEXED"
     SUPERSEDED = "SUPERSEDED"
+    ARCHIVED = "ARCHIVED"
     FAILED = "FAILED"
 
 
@@ -35,6 +37,16 @@ class ParsedBlock:
 
 
 @dataclass(frozen=True)
+class ParsedTable:
+    """Raw rows of a table too large to embed row by row; routed to the tabular store."""
+
+    table_id: str
+    name: str
+    columns: List[str]
+    rows: List[List[Any]]
+
+
+@dataclass(frozen=True)
 class ParsedDocument:
     """Full parse result: page texts for legacy paths plus structured blocks."""
 
@@ -44,6 +56,7 @@ class ParsedDocument:
     parser_name: str = ""
     parser_degraded: bool = False
     parser_fallback_reason: str = ""
+    tables: List[ParsedTable] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -101,6 +114,14 @@ class IngestionReport:
     parser_name: str = ""
     parser_degraded: bool = False
     parser_fallback_reason: str = ""
+    trust_tier: str = "unverified"
+    effective_date: Optional[str] = None
+    expires_at: Optional[str] = None
+    business_domain: str = ""
+    source_system: str = "upload"
+    subject_ids: List[str] = field(default_factory=list)
+    detected_subject_ids: List[str] = field(default_factory=list)
+    table_ids: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -126,6 +147,14 @@ class IngestionReport:
             "parser_name": self.parser_name,
             "parser_degraded": self.parser_degraded,
             "parser_fallback_reason": self.parser_fallback_reason,
+            "trust_tier": self.trust_tier,
+            "effective_date": self.effective_date,
+            "expires_at": self.expires_at,
+            "business_domain": self.business_domain,
+            "source_system": self.source_system,
+            "subject_ids": list(self.subject_ids),
+            "detected_subject_ids": list(self.detected_subject_ids),
+            "table_ids": list(self.table_ids),
         }
 
     @classmethod
@@ -158,4 +187,12 @@ class IngestionReport:
             parser_name=str(data.get("parser_name") or ""),
             parser_degraded=bool(data.get("parser_degraded", False)),
             parser_fallback_reason=str(data.get("parser_fallback_reason") or ""),
+            trust_tier=str(data.get("trust_tier") or "unverified"),
+            effective_date=data.get("effective_date"),
+            expires_at=data.get("expires_at"),
+            business_domain=str(data.get("business_domain") or ""),
+            source_system=str(data.get("source_system") or "upload"),
+            subject_ids=list(data.get("subject_ids") or []),
+            detected_subject_ids=list(data.get("detected_subject_ids") or []),
+            table_ids=list(data.get("table_ids") or []),
         )

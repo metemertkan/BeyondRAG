@@ -1,8 +1,26 @@
 # BeyondRAG Episode 2 — What shipped
 
-**Branch:** `cursor/episode-2-ingestion-b42f`  
-**Base:** `main`  
-**Run it locally:** `git checkout cursor/episode-2-ingestion-b42f && docker compose up -d --build` then open `http://localhost:8090`.
+**Run it locally:** `docker compose up -d --build` then open `http://localhost:8090`.
+
+This file records the first Episode 2 increment (versioning, PDF layout, embedding contract), then the second (Excel, multilingual, semantic chunking, trust tiers, GDPR, CI evaluation) under "Ingestion challenges increment". Where the two disagree, the second is current.
+
+## Ingestion challenges increment
+
+| Claim | Where | Test |
+| --- | --- | --- |
+| Excel: merged cells, compound headers, cached formula results, cross-sheet lineage, hidden sheets skipped | `XlsxDocumentParser` | `test_excel_*` |
+| Large sheets: one summary chunk plus SQLite; ACL-checked structured queries, no raw SQL | `tabular_store.py`, `service.py` | `test_large_table_*`, `test_table_*`, `test_llm_answer_receives_structured_query_result_as_a_source` |
+| RTL: visual-order PDF text restored, exact match with source on the Arabic fixture | `multilingual.py`, `extractor.py` | `test_arabic_pdf_extraction_matches_source_text_exactly` |
+| Chinese respects `max_tokens` (was one 960-token chunk at a 100-token limit) | `chunker.py` | `test_unspaced_chinese_respects_max_tokens_and_adds_no_spaces` |
+| Arabic gets real vectors in `feature_hash` (was a placeholder), independent of tashkeel | `embeddings.py` | `test_arabic_gets_a_real_vector_and_tashkeel_does_not_change_it` |
+| ES analyzer: Arabic normalization, Arabic-Indic digits, Han bigrams | `es_client.py` | `test_live_es_analyzer_*` |
+| Scanned PDF pages via OCR port; warning when no engine is configured | `ocr.py` | `test_scanned_page_*`; the PaddleOCR adapter was also run by hand against `arabic_scanned_policy.pdf` |
+| Semantic chunking with overlap, size limits, latency telemetry; adaptive routing | `chunker.py` | `test_semantic_chunker_*`, `test_adaptive_*` |
+| Expiry filter, trust-tier re-ranking, conflict detection, precedence prompt | `governance.py`, `retriever.py`, `synthesizer.py` | `test_expired_*`, `test_trust_tier_*`, `test_conflict_*`, `test_llm_prompt_*`, `test_live_es_filters_*` |
+| Erasure across all versions, files, tables, concepts and registry; verification; tombstones | `erasure.py`, `repository.py` | `test_erasure_*`, `test_tombstone_*`, `test_live_es_erasure_*` |
+| Physical purge tracked separately because ES retains soft-deleted text | `confirm_physical_purge` | `test_live_es_erasure_*`, `test_physical_purge_timeout_*` |
+| Source-system delete and archive events, idempotent; fail-closed API token | `SourceSyncHandler`, `app.py` | `test_source_*`, `test_destructive_endpoints_*` |
+| CI gate: golden set, Context Precision, Faithfulness, deterministic stale-fact check; inconclusive never passes | `src/eval/`, `rag-eval.yml` | `test_gate_*`, `test_dead_judge_*`, `test_silent_fallback_*` |
 
 ## Claims → code / tests
 
@@ -23,7 +41,7 @@
 | Languages fully config/data-driven (no EN/ZH hardcode in orchestration) | Runtime JSON only: `config/language_packs.defaults.json` (+ workspace override). Loader `src/rag/language_packs.py` has no pack dicts. UI demo prompts/lang from `config/ui_demo.json` via `/api/ui-demo-config`. Tests in `tests/test_episode2_amendment_o1_o3.py`. |
 | Explicit PDF parser degraded policy | `RAG_PARSER_ALLOW_DEGRADED`; registry records `parser_name` / `parser_degraded` / reason; same-bytes refuses flat overwrite of pdfplumber INDEXED |
 | Stage-then-publish supersede | `DocumentRepository.publish_new_current`; v2 staged then INDEXED before v1→SUPERSEDED; exactly one current; v2 fail leaves v1 |
-| Upload accepts PDF + Markdown + txt | `/api/upload` in `src/web/app.py` (`.pdf`, `.md`, `.txt`). Excel **not** this episode; registry remains pluggable (`ExcelDocumentParser` stub / `register`). |
+| Upload accepts PDF + Markdown + txt + xlsx | `/api/upload` in `src/web/app.py`. Excel added in the ingestion challenges increment. |
 | Rollback on embed / bulk failure | `test_embed_failure_rolls_back_no_partial_chunks`, `test_bulk_index_failure_rolls_back_no_dual_current` |
 
 ## Exact G1 surface answers
@@ -36,8 +54,8 @@
 
 ## Explicitly not shipped / unclaimed
 
-- Full OCR / handwriting
-- Excel production parser
+- Handwriting OCR; mixed-script OCR accuracy is limited (see README)
+- Legacy `.xls` files (re-save as `.xlsx`)
 - Docling / PyMuPDF as default
 - Invented benchmark numbers
 - **ZH query → EN table cell end-to-end retrieval demo:** **explicitly unclaimed this episode.** Language packs + JA detect are tested; a live ZH→EN table-cell retrieval under Finance + bge-m3 is not covered by a dedicated acceptance test (would need a live embedding model or a canned expansion that overclaims). Do not show it in Short/Hashnode as shipped proof.

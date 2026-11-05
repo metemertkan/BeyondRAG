@@ -11,6 +11,8 @@ dependencies = [
     "elasticsearch>=8.15.0,<9.0.0",
     "pypdf>=5.0.0",
     "pdfplumber>=0.11.0",
+    "openpyxl>=3.1.0",
+    "jieba>=0.42.1",
     "reportlab>=4.2.0",
     "pydantic>=2.9.0",
     "python-dotenv>=1.0.1",
@@ -23,6 +25,17 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+]
+# Fixture generation only: committed fixtures do not need these at runtime.
+fixtures = [
+    "xlsxwriter>=3.2.0",
+    "arabic-reshaper>=3.0.0",
+    "python-bidi>=0.6.0",
+]
+# Scanned-page OCR. Large install, so opt-in (see RAG_OCR_LANGS).
+ocr = [
+    "paddleocr>=3.0.0,<4",
+    "paddlepaddle>=3.0.0",
 ]
 
 [build-system]

@@ -25,6 +25,12 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - RAG_CORPUS_LANGUAGE=${RAG_CORPUS_LANGUAGE:-en}
       - RAG_LANGUAGE_PACKS_PATH=${RAG_LANGUAGE_PACKS_PATH:-}
+      - RAG_CHUNKING_STRATEGY=${RAG_CHUNKING_STRATEGY:-adaptive}
+      - RAG_XLSX_INLINE_ROWS=${RAG_XLSX_INLINE_ROWS:-40}
+      - RAG_XLSX_LLM_SUMMARY=${RAG_XLSX_LLM_SUMMARY:-false}
+      - RAG_OCR_LANGS=${RAG_OCR_LANGS:-}
+      - RAG_GOVERNANCE_TOKEN=${RAG_GOVERNANCE_TOKEN:-}
+      - RAG_ERASURE_KEY=${RAG_ERASURE_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

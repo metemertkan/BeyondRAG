@@ -1,0 +1,66 @@
+# After every merge to main: run the tests, then have an LLM judge score the pipeline
+# against the golden dataset. Needs one repository secret: GOOGLE_API_KEY.
+#
+# scripts/run_eval.py exits 1 when quality drops below the floors in
+# eval/golden_dataset.json, and 2 when nothing could be evaluated. Both fail the run:
+# a missing key or a dead judge must never look like a pass.
+name: RAG evaluation
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rag-eval
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+        ports: ["9200:9200"]
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: "false"
+          ES_JAVA_OPTS: -Xms1g -Xmx1g
+        options: >-
+          --health-cmd "curl -fsS http://localhost:9200/_cluster/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      ELASTICSEARCH_URL: http://localhost:9200
+      RAG_EMBEDDING_PROVIDER: feature_hash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Unit and acceptance tests
+        run: pytest tests -q
+      - name: LLM-as-a-judge gate
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: >-
+          python scripts/run_eval.py
+          --require-gemini
+          --require-elasticsearch
+          --report-json eval-report.json
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rag-eval-report
+          path: eval-report.json
+          if-no-files-found: ignore

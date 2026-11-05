@@ -53,7 +53,6 @@ class DocumentParserPort(Protocol):
 
     Implementations may also expose ``extract_document`` returning a
     :class:`ParsedDocument` with structure-preserving blocks (tables, columns).
-    Excel (.xlsx) adapters can register later without changing this port.
     """
 
     def extract_pages(self, filename: str, file_bytes: bytes) -> Tuple[int, List[Tuple[int, str]]]:
@@ -147,6 +146,7 @@ class PdfIngestorPort(Protocol):
         doc_id: str | None = None,
         tenant: str | None = None,
         source_key: str | None = None,
+        governance: Any = None,
     ) -> Dict[str, Any]:
         ...
 

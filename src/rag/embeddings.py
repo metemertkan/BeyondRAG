@@ -24,9 +24,28 @@ from typing import Final, List, Optional, Protocol
 import httpx
 
 from src.config import GOOGLE_API_KEY, OLLAMA_BASE_URL, is_valid_api_key
+from src.rag.multilingual import normalize_for_matching
 
-_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9_]+|[\u4e00-\uffff]+", re.IGNORECASE)
-_CJK_CHAR_RE: Final[re.Pattern[str]] = re.compile(r"[\u4e00-\uffff]")
+# Latin/digits, Arabic-script words, and runs of CJK. CJK runs are hashed as bigrams
+# below: hashing a whole unspaced sentence as one token would never match a query.
+_TOKEN_RE: Final[re.Pattern[str]] = re.compile(
+    r"[a-z0-9_]+|[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]+"
+    r"|[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]+",
+    re.IGNORECASE,
+)
+_CJK_CHAR_RE: Final[re.Pattern[str]] = re.compile(
+    r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]"
+)
+
+
+def _hash_tokens(text: str) -> List[str]:
+    tokens: List[str] = []
+    for token in _TOKEN_RE.findall(normalize_for_matching(text).lower()):
+        if _CJK_CHAR_RE.match(token) and len(token) > 2:
+            tokens.extend(token[i : i + 2] for i in range(len(token) - 1))
+        else:
+            tokens.append(token)
+    return tokens
 
 
 class EmbeddingManifestMismatchError(ValueError):
@@ -144,7 +163,7 @@ class FeatureHashEmbeddingProvider:
 
     def _embed_single(self, text: str) -> List[float]:
         vec = [0.0] * self._dimensions
-        tokens = _TOKEN_RE.findall(text.lower())
+        tokens = _hash_tokens(text)
         if not tokens:
             vec[0] = 1.0
             return vec
@@ -546,6 +565,11 @@ class CrossLingualEmbedder:
         return self._provider.manifest
 
     def embed(self, text: str) -> List[float]:
-        vector = self._provider.embed_query(text)
+        # Same canonical form at ingest and query time, for every provider.
+        vector = self._provider.embed_query(normalize_for_matching(text))
         assert_vector_matches_manifest(vector, self._provider.manifest)
         return vector
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """Batch path for semantic chunking, which embeds every sentence."""
+        return self._provider.embed_documents([normalize_for_matching(text) for text in texts])

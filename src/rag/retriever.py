@@ -12,8 +12,14 @@ from typing import Any, Dict, List
 from src.rag.acl import PUBLIC_SENTINEL_TAG, extract_visible_tags
 from src.rag.embeddings import STOPWORDS, has_cjk
 from src.rag.es_client import ElasticsearchIndexManager
+from src.rag.governance import apply_trust_ranking, is_expired
 from src.rag.ports import HybridSearchOutcome
 from src.rag.profiles import RetrievalProfile, get_retrieval_profile
+
+
+# Fetch extra candidates so trust ranking can promote a chunk from outside the top-k.
+_RERANK_OVERFETCH = 3
+_GOVERNANCE_FIELDS = ("trust_tier", "effective_date", "expires_at", "business_domain", "subject_ids")
 
 
 class HybridRetriever:
@@ -73,12 +79,15 @@ class HybridRetriever:
         authorized_chunks: List[Dict[str, Any]] = []
         masked_restricted_docs: List[Dict[str, Any]] = []
 
-        # Exclude soft-superseded / non-current versions from retrieval.
+        # Exclude superseded, archived and expired content from retrieval.
+        fetch_size = effective_top_k * _RERANK_OVERFETCH
         current_only_filter = {
             "bool": {
                 "must_not": [
                     {"term": {"is_current": False}},
                     {"term": {"ingestion_status": "SUPERSEDED"}},
+                    {"term": {"ingestion_status": "ARCHIVED"}},
+                    {"range": {"expires_at": {"lt": "now/d"}}},
                 ]
             }
         }
@@ -87,7 +96,7 @@ class HybridRetriever:
             self.es_manager.ensure_index()
             resp = self.es_manager.client.search(
                 index=self.es_manager.index_name,
-                size=effective_top_k,
+                size=fetch_size,
                 query={
                     "bool": {
                         "should": [
@@ -115,8 +124,8 @@ class HybridRetriever:
                 knn={
                     "field": "embedding",
                     "query_vector": query_vector,
-                    "k": effective_top_k,
-                    "num_candidates": max(20, effective_top_k * profile.num_candidates_multiplier),
+                    "k": fetch_size,
+                    "num_candidates": max(20, fetch_size, effective_top_k * profile.num_candidates_multiplier),
                     "filter": [acl_filter_clause, current_only_filter],
                 },
             )
@@ -140,8 +149,11 @@ class HybridRetriever:
                         "source_key": src.get("source_key"),
                         "doc_version": src.get("doc_version"),
                         "ingestion_status": src.get("ingestion_status"),
+                        "metadata": src.get("metadata") or {},
+                        **{name: src.get(name) for name in _GOVERNANCE_FIELDS},
                     }
                 )
+            authorized_chunks = apply_trust_ranking(authorized_chunks)[:effective_top_k]
 
             domain_keywords = " ".join(
                 w.strip("?.,!\"'()？，。！")
@@ -166,7 +178,9 @@ class HybridRetriever:
                                 }
                             }
                         ],
+                        # The audit must not reveal retired content either.
                         "must_not": [acl_filter_clause],
+                        "filter": [current_only_filter],
                     }
                 },
             )
@@ -189,7 +203,9 @@ class HybridRetriever:
                 # Soft-superseded versions stay in storage but are excluded from retrieval.
                 if rec.get("is_current") is False:
                     continue
-                if rec.get("ingestion_status") == "SUPERSEDED":
+                if rec.get("ingestion_status") in {"SUPERSEDED", "ARCHIVED"}:
+                    continue
+                if is_expired(rec.get("expires_at")):
                     continue
                 rec_tags = set(rec.get("acl_tags", [PUBLIC_SENTINEL_TAG]))
                 if rec_tags.intersection(effective_acl_tags):
@@ -208,10 +224,11 @@ class HybridRetriever:
                             "block_type": rec.get("block_type"),
                             "source_key": rec.get("source_key"),
                             "doc_version": rec.get("doc_version"),
+                            "metadata": rec.get("metadata") or {},
+                            **{name: rec.get(name) for name in _GOVERNANCE_FIELDS},
                         }
                     )
-            authorized_chunks.sort(key=lambda c: c["score"], reverse=True)
-            authorized_chunks = authorized_chunks[:top_k]
+            authorized_chunks = apply_trust_ranking(authorized_chunks)[:top_k]
             elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
 
         return HybridSearchOutcome(
