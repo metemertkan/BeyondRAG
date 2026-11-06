@@ -57,16 +57,34 @@ class ElasticsearchIndexManager:
                 settings={
                     "index.search.slowlog.threshold.query.warn": "0ms",
                     "index.search.slowlog.threshold.fetch.warn": "0ms",
+                    "analysis": {
+                        "analyzer": {
+                            # Built-in filters only, no plugins: full-width folding, Arabic
+                            # diacritic and letter-form normalization, Arabic-Indic digits
+                            # to ASCII, and Han bigrams instead of isolated characters.
+                            "multilingual": {
+                                "type": "custom",
+                                "tokenizer": "standard",
+                                "filter": [
+                                    "cjk_width",
+                                    "lowercase",
+                                    "arabic_normalization",
+                                    "decimal_digit",
+                                    "cjk_bigram",
+                                ],
+                            }
+                        }
+                    },
                 },
                 mappings={
                     "properties": {
                         "chunk_id": {"type": "keyword"},
                         "doc_id": {"type": "keyword"},
                         "filename": {"type": "keyword"},
-                        "title": {"type": "text"},
+                        "title": {"type": "text", "analyzer": "multilingual"},
                         "page_number": {"type": "integer"},
                         "chunk_index": {"type": "integer"},
-                        "content": {"type": "text"},
+                        "content": {"type": "text", "analyzer": "multilingual"},
                         "is_public": {"type": "boolean"},
                         "acl_tags": {"type": "keyword"},
                         "uploaded_at": {"type": "keyword"},
@@ -80,6 +98,13 @@ class ElasticsearchIndexManager:
                         "block_type": {"type": "keyword"},
                         "embedding_manifest": {"type": "keyword"},
                         "parser_name": {"type": "keyword"},
+                        # Governance and lineage (trust tiers, expiry, GDPR erasure).
+                        "trust_tier": {"type": "keyword"},
+                        "effective_date": {"type": "date"},
+                        "expires_at": {"type": "date"},
+                        "business_domain": {"type": "keyword"},
+                        "source_system": {"type": "keyword"},
+                        "subject_ids": {"type": "keyword"},
                         "embedding": {
                             "type": "dense_vector",
                             "dims": self.dimensions,

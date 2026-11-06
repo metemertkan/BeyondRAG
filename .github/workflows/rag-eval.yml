@@ -1,0 +1,48 @@
+# Manual run on a self-hosted runner, because the judge is local Ollama and
+# GitHub-hosted runners do not have it. Needs a runner on a machine with uv, Ollama
+# (qwen3:8b pulled) and the Elasticsearch from docker-compose.yml running.
+#
+# scripts/run_eval.py exits 1 when quality drops below the floors in
+# eval/golden_dataset.json, and 2 when nothing could be evaluated. Both fail the run:
+# a dead judge must never look like a pass.
+name: RAG evaluation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rag-eval
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: self-hosted
+    timeout-minutes: 60
+    env:
+      ELASTICSEARCH_URL: http://localhost:9200
+      OLLAMA_BASE_URL: http://localhost:11434
+      RAG_EMBEDDING_PROVIDER: feature_hash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          uv venv --clear --python 3.12 .venv
+          uv pip install --python .venv/bin/python -e ".[dev]"
+      - name: Unit and acceptance tests
+        run: .venv/bin/python -m pytest tests -q
+      - name: LLM-as-a-judge gate
+        run: >-
+          .venv/bin/python scripts/run_eval.py
+          --require-elasticsearch
+          --report-json eval-report.json
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rag-eval-report
+          path: eval-report.json
+          if-no-files-found: ignore

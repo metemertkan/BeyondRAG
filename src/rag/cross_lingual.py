@@ -252,6 +252,35 @@ class DynamicConceptRegistry:
         }
         self._save()
 
+    def forget(self, concept_ids: List[str], *, subject_id: str | None = None) -> int:
+        """Remove concepts derived from erased documents, plus any cache entry naming the subject.
+
+        Concepts are LLM output about a document's content, so they are derived personal data.
+        Query translations can also contain a name somebody typed into the chat box.
+        """
+        ids = set(concept_ids)
+        needle = (subject_id or "").lower()
+        removed = 0
+        for key, entry in list(self._documents.items()):
+            entry_ids = {str(item.get("concept_id")) for item in entry.get("concepts", [])}
+            if entry_ids & ids or (needle and needle in json.dumps(entry, ensure_ascii=False).lower()):
+                del self._documents[key]
+                removed += 1
+        if needle:
+            for query, keywords in list(self._query_cache.items()):
+                if needle in query.lower() or needle in str(keywords).lower():
+                    del self._query_cache[query]
+                    removed += 1
+        if removed:
+            self._save()
+        return removed
+
+    def count_mentions(self, subject_id: str) -> int:
+        needle = subject_id.lower()
+        documents = sum(1 for entry in self._documents.values() if needle in json.dumps(entry, ensure_ascii=False).lower())
+        queries = sum(1 for query, keywords in self._query_cache.items() if needle in f"{query} {keywords}".lower())
+        return documents + queries
+
     def get_cached_query_translation(self, query: str) -> str | None:
         return self._query_cache.get(query.strip())
 

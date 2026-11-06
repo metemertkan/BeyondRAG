@@ -14,10 +14,12 @@ ReportLab, or FastAPI):
   9. Cross-Lingual Query Handling  -> `CrossLingualPort` (`cross_lingual.py`)
   10. Answer Synthesis             -> `AnswerSynthesizerPort` (`synthesizer.py`)
   11. Demo Document Seeding        -> `DemoSeederPort` (`seeding.py`)
+  12. Erasure & Source Sync        -> `ErasureService`, `SourceSyncHandler` (`erasure.py`)
 """
 
 from __future__ import annotations
 
+import inspect
 from typing import Any, Dict, Final, List
 
 from src.rag.acl import (
@@ -27,6 +29,7 @@ from src.rag.acl import (
     normalize_tags,
     resolve_document_acl,
 )
+from src.rag.governance import DocumentGovernance, detect_conflicts
 from src.rag.ports import (
     AnswerSynthesizerPort,
     CrossLingualPort,
@@ -61,7 +64,8 @@ def _wire_default_components(
     from src.rag.es_client import ElasticsearchIndexManager
     from src.rag.extractor import DocumentParserRegistry
     from src.rag.ingestor import PdfIngestor
-    from src.rag.repository import DEFAULT_REGISTRY_PATH, DocumentRepository
+    from src.rag.repository import DEFAULT_REGISTRY_PATH, DEFAULT_TABULAR_PATH, DocumentRepository
+    from src.rag.tabular_store import TabularStore
     from src.rag.retriever import HybridRetriever
     from src.rag.seeding import DemoDocumentSeeder
     from src.rag.synthesizer import GroundedAnswerSynthesizer
@@ -74,13 +78,14 @@ def _wire_default_components(
         index_name=KB_INDEX_NAME,
     )
     extractor = DocumentParserRegistry()
-    chunker = create_chunker()
-    cross_lingual = DefaultCrossLingualAdapter()
     embedder = CrossLingualEmbedder()
+    chunker = create_chunker(embedder=embedder)
+    cross_lingual = DefaultCrossLingualAdapter()
     repository = DocumentRepository(
         es_manager=es_manager,
         registry_path=DEFAULT_REGISTRY_PATH,
         persist_registry=True,
+        tabular_store=TabularStore(DEFAULT_TABULAR_PATH),
     )
     ingestor = PdfIngestor(
         extractor=extractor,
@@ -191,6 +196,7 @@ class RBACKnowledgeBaseService:
         doc_id: str | None = None,
         tenant: str | None = None,
         source_key: str | None = None,
+        governance: DocumentGovernance | None = None,
     ) -> Dict[str, Any]:
         return self._ingestor.ingest(
             filename=filename,
@@ -199,6 +205,7 @@ class RBACKnowledgeBaseService:
             doc_id=doc_id,
             tenant=tenant,
             source_key=source_key,
+            governance=governance,
         )
 
     def list_documents(self, *, include_superseded: bool = True) -> List[Dict[str, Any]]:
@@ -233,6 +240,24 @@ class RBACKnowledgeBaseService:
     def delete_document(self, doc_id: str) -> Dict[str, Any]:
         return self._repository.delete_document(doc_id)
 
+    def erasure_service(self) -> Any:
+        """Hard-deletion coordinator wired to this service's stores."""
+        from src.rag.cross_lingual import get_concept_registry
+        from src.rag.erasure import ErasureService
+
+        from src.config import WORKSPACE_DIR
+
+        return ErasureService(
+            self._repository,
+            concept_registry=get_concept_registry(),
+            audit_log_path=WORKSPACE_DIR / "erasure_log.jsonl",
+        )
+
+    def source_sync_handler(self) -> Any:
+        from src.rag.erasure import SourceSyncHandler
+
+        return SourceSyncHandler(self._repository, self.erasure_service())
+
     def seed_sample_pdfs(self) -> List[Dict[str, Any]]:
         return self._seeder.seed(self)
 
@@ -265,6 +290,23 @@ class RBACKnowledgeBaseService:
             profile_name=retrieval_profile,
         )
 
+        allowed_tables = {
+            chunk["metadata"]["table_id"]
+            for chunk in search_outcome.authorized_chunks
+            if isinstance(chunk.get("metadata"), dict) and chunk["metadata"].get("table_id")
+        }
+
+        def run_table_query(table_query: Any) -> Dict[str, Any]:
+            # Only tables whose summary this user just retrieved: that set has already
+            # passed the ACL, current-version and expiry filters.
+            if table_query.table_id not in allowed_tables:
+                raise PermissionError(f"Table {table_query.table_id} was not retrieved for this query")
+            return self._repository.tabular_store.query(table_query, effective_acl_tags)  # type: ignore[attr-defined]
+
+        extra_args: Dict[str, Any] = {}
+        if allowed_tables and "table_query_runner" in inspect.signature(self._synthesizer.synthesize).parameters:
+            extra_args["table_query_runner"] = run_table_query
+
         answer = self._synthesizer.synthesize(
             question=question,
             expanded_query=expanded_query,
@@ -274,6 +316,7 @@ class RBACKnowledgeBaseService:
             authorized_chunks=search_outcome.authorized_chunks,
             masked_restricted_docs=search_outcome.masked_restricted_docs,
             synthesis_mode=synthesis_mode,
+            **extra_args,
         )
 
         return {
@@ -287,6 +330,7 @@ class RBACKnowledgeBaseService:
             "authorized_chunks": search_outcome.authorized_chunks,
             "masked_restricted_docs": search_outcome.masked_restricted_docs,
             "es_query_dsl": search_outcome.query_dsl,
+            "conflicts": detect_conflicts(search_outcome.authorized_chunks),
             "answer": answer,
         }
 

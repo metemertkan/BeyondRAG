@@ -1,0 +1,118 @@
+{
+  "description": "Small golden set that shows the intended behaviour. Production sets hold hundreds of diverse queries.",
+  "top_k": 3,
+  "thresholds": {
+    "context_precision": 0.7,
+    "faithfulness": 0.8,
+    "answer_correct": 0.75,
+    "retired_fact_leaks": 0
+  },
+  "corpus": [
+    {
+      "path": "tests/fixtures/pdfs/policy_v1_liquidity_table.pdf",
+      "source_key": "treasury-liquidity",
+      "tags": ["finance"],
+      "governance": {"trust_tier": "official_policy", "effective_date": "2025-01-15", "business_domain": "treasury"}
+    },
+    {
+      "path": "tests/fixtures/pdfs/policy_v2_liquidity_table.pdf",
+      "source_key": "treasury-liquidity",
+      "tags": ["finance"],
+      "governance": {"trust_tier": "official_policy", "effective_date": "2026-01-15", "business_domain": "treasury"}
+    },
+    {
+      "path": "eval/corpus/it_password_policy_2023.md",
+      "source_key": "it-policy-2023",
+      "governance": {"trust_tier": "official_policy", "effective_date": "2023-03-01", "expires_at": "2025-12-31", "business_domain": "it"}
+    },
+    {
+      "path": "eval/corpus/it_password_policy_2026.md",
+      "source_key": "it-policy-2026",
+      "governance": {"trust_tier": "official_policy", "effective_date": "2026-01-01", "business_domain": "it"}
+    },
+    {
+      "path": "eval/corpus/it_security_draft_notes.md",
+      "source_key": "it-draft-notes",
+      "governance": {"trust_tier": "draft_notes", "effective_date": "2026-09-10", "business_domain": "it"}
+    },
+    {
+      "path": "eval/corpus/remote_work_policy.md",
+      "source_key": "hr-remote-work",
+      "governance": {"trust_tier": "reviewed", "effective_date": "2025-06-01", "business_domain": "hr"}
+    },
+    {
+      "path": "eval/corpus/travel_policy_zh.md",
+      "source_key": "finance-travel-zh",
+      "governance": {"trust_tier": "official_policy", "effective_date": "2025-09-01", "business_domain": "finance"}
+    },
+    {
+      "path": "tests/fixtures/pdfs/arabic_mixed_policy.pdf",
+      "source_key": "treasury-liquidity-ar",
+      "tags": ["finance"],
+      "governance": {"trust_tier": "reviewed", "effective_date": "2026-01-20", "business_domain": "treasury"}
+    },
+    {
+      "path": "tests/fixtures/xlsx/regional_budget.xlsx",
+      "source_key": "finance-budget-fy2026",
+      "tags": ["finance"],
+      "governance": {"trust_tier": "official_policy", "effective_date": "2026-01-05", "business_domain": "finance"}
+    }
+  ],
+  "cases": [
+    {
+      "id": "versioned-table-value",
+      "question": "What is the intraday HKD cash buffer threshold?",
+      "roles": ["finance"],
+      "expected_answer": "HKD 520,000,000",
+      "must_contain_any": ["520,000,000"],
+      "retired_facts": ["450,000,000"]
+    },
+    {
+      "id": "conflict-expired-and-draft",
+      "question": "How often must employees rotate their network password?",
+      "expected_answer": "Every 180 days, under the 2026 IT Security Policy.",
+      "must_contain_any": ["180"],
+      "retired_facts": ["every 90 days"]
+    },
+    {
+      "id": "plain-policy-lookup",
+      "question": "How many days per week can staff work remotely?",
+      "expected_answer": "Up to 3 days per week with line manager approval.",
+      "must_contain_any": ["3 days", "three days"]
+    },
+    {
+      "id": "chinese-document",
+      "question": "员工出差住宿费用上限是多少？",
+      "expected_answer": "每晚 HKD 1,800",
+      "must_contain_any": ["1,800"]
+    },
+    {
+      "id": "arabic-rtl-pdf",
+      "question": "ما هو الحد الأدنى للسيولة النقدية؟",
+      "roles": ["finance"],
+      "expected_answer": "HKD 520,000,000",
+      "must_contain_any": ["520,000,000"]
+    },
+    {
+      "id": "excel-formula-result",
+      "question": "What is the Q1 HKD budget for Singapore in the regional budget?",
+      "roles": ["finance"],
+      "expected_answer": "HKD 390,000",
+      "must_contain_any": ["390,000"]
+    },
+    {
+      "id": "excel-merged-cell",
+      "question": "Which region does the Hong Kong budget line belong to, and who owns it?",
+      "roles": ["finance"],
+      "expected_answer": "Asia, owned by maya.chen@example.com",
+      "must_contain_any": ["maya.chen@example.com"]
+    },
+    {
+      "id": "large-table-structured-query",
+      "question": "What is the total Amount USD across all transactions in the Transactions sheet?",
+      "roles": ["finance"],
+      "expected_answer": "9,092,526 USD",
+      "must_contain_any": ["9,092,526"]
+    }
+  ]
+}

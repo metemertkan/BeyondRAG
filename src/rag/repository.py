@@ -7,27 +7,35 @@ Features:
   - Soft supersession: prior versions retained, marked non-current for retrieval
   - Bulk indexing in Elasticsearch + memory fallback
   - Full cleanup and rollback on failure
+  - Lineage queries, hard deletion across stores, and erasure tombstones
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, Final, List, Optional, Sequence
+from typing import Any, Dict, Final, Iterable, List, Optional, Sequence, Tuple
 
 from elasticsearch.helpers import bulk
 
 from src.config import WORKSPACE_DIR
 from src.rag.acl import PUBLIC_SENTINEL_TAG, extract_visible_tags
+from src.rag.erasure import ErasedSourceError, hash_with_key, load_erasure_key
 from src.rag.es_client import ElasticsearchIndexManager
-from src.rag.models import IngestionReport, IngestionState
+from src.rag.governance import normalize_subject_id
+from src.rag.models import IngestionReport, IngestionState, ParsedTable
+from src.rag.tabular_store import TabularStore
 
 logger = logging.getLogger(__name__)
 
 UPLOADS_DIR: Final[Path] = WORKSPACE_DIR / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_REGISTRY_PATH: Final[Path] = WORKSPACE_DIR / "document_registry.json"
+DEFAULT_TABULAR_PATH: Final[Path] = WORKSPACE_DIR / "tabular_store.sqlite"
+DEFAULT_ERASURE_KEY_PATH: Final[Path] = WORKSPACE_DIR / ".erasure_key"
+MAX_PROCESSED_EVENTS: Final[int] = 5000
 
 
 class DocumentRepository:
@@ -40,6 +48,8 @@ class DocumentRepository:
         registry_path: Path | None = None,
         *,
         persist_registry: bool | None = None,
+        tabular_store: TabularStore | None = None,
+        erasure_key_path: Path | None = None,
     ) -> None:
         self.es_manager = es_manager
         self.uploads_dir = uploads_dir
@@ -55,6 +65,12 @@ class DocumentRepository:
         self._doc_states: Dict[str, IngestionReport] = {}
         self._current_by_source_key: Dict[str, str] = {}
         self._index_embedding_manifest: Optional[str] = None
+        self.tabular_store = tabular_store or TabularStore()
+        self._erasure_key_path = erasure_key_path or self.registry_path.parent / DEFAULT_ERASURE_KEY_PATH.name
+        self._erasure_key: Optional[bytes] = None
+        # Tombstones hold keyed hashes only and outlive the data they refer to.
+        self._tombstones: Dict[str, str] = {}
+        self._processed_events: List[str] = []
         if self._persist_enabled:
             self._load_registry()
 
@@ -77,6 +93,8 @@ class DocumentRepository:
         }
         manifest = raw.get("index_embedding_manifest")
         self._index_embedding_manifest = str(manifest) if manifest else None
+        self._tombstones = {str(k): str(v) for k, v in (raw.get("tombstones") or {}).items()}
+        self._processed_events = [str(e) for e in (raw.get("processed_events") or [])]
 
     def _persist_registry(self) -> None:
         if not self._persist_enabled:
@@ -86,6 +104,8 @@ class DocumentRepository:
             "documents": {doc_id: report.to_dict() for doc_id, report in self._doc_states.items()},
             "current_by_source_key": dict(self._current_by_source_key),
             "index_embedding_manifest": self._index_embedding_manifest,
+            "tombstones": dict(self._tombstones),
+            "processed_events": list(self._processed_events),
         }
         tmp_path = self.registry_path.with_suffix(".tmp")
         tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -108,30 +128,7 @@ class DocumentRepository:
         existing = self._doc_states.get(doc_id)
         if existing is None:
             return
-        superseded = IngestionReport(
-            doc_id=existing.doc_id,
-            filename=existing.filename,
-            status=IngestionState.SUPERSEDED,
-            page_count=existing.page_count,
-            chunk_count=existing.chunk_count,
-            is_public=existing.is_public,
-            tags=list(existing.tags),
-            acl_tags=list(existing.acl_tags),
-            uploaded_at=existing.uploaded_at,
-            dynamic_concepts=list(existing.dynamic_concepts),
-            concept_model=existing.concept_model,
-            error_message=existing.error_message,
-            source_key=existing.source_key,
-            content_hash=existing.content_hash,
-            doc_version=existing.doc_version,
-            tenant=existing.tenant,
-            is_current=False,
-            supersedes_doc_id=existing.supersedes_doc_id,
-            embedding_manifest=existing.embedding_manifest,
-            parser_name=existing.parser_name,
-            parser_degraded=existing.parser_degraded,
-            parser_fallback_reason=existing.parser_fallback_reason,
-        )
+        superseded = replace(existing, status=IngestionState.SUPERSEDED, is_current=False)
         self._doc_states[doc_id] = superseded
         self._set_chunks_current(doc_id, is_current=False, status=IngestionState.SUPERSEDED.value)
         self._persist_registry()
@@ -244,6 +241,7 @@ class DocumentRepository:
                     in {
                         IngestionState.INDEXED,
                         IngestionState.SUPERSEDED,
+                        IngestionState.ARCHIVED,
                         IngestionState.FAILED,
                         IngestionState.PENDING,
                         IngestionState.PROCESSING,
@@ -348,31 +346,9 @@ class DocumentRepository:
         existing = self._doc_states.get(doc_id)
         if existing:
             self.set_document_state(
-                IngestionReport(
-                    doc_id=existing.doc_id,
-                    filename=existing.filename,
-                    status=existing.status,
-                    page_count=existing.page_count,
-                    chunk_count=existing.chunk_count,
-                    is_public=is_public,
-                    tags=extract_visible_tags(acl_tags),
-                    acl_tags=acl_tags,
-                    uploaded_at=existing.uploaded_at,
-                    dynamic_concepts=list(existing.dynamic_concepts),
-                    concept_model=existing.concept_model,
-                    error_message=existing.error_message,
-                    source_key=existing.source_key,
-                    content_hash=existing.content_hash,
-                    doc_version=existing.doc_version,
-                    tenant=existing.tenant,
-                    is_current=existing.is_current,
-                    supersedes_doc_id=existing.supersedes_doc_id,
-                    embedding_manifest=existing.embedding_manifest,
-                    parser_name=existing.parser_name,
-                    parser_degraded=existing.parser_degraded,
-                    parser_fallback_reason=existing.parser_fallback_reason,
-                )
+                replace(existing, is_public=is_public, tags=extract_visible_tags(acl_tags), acl_tags=acl_tags)
             )
+        self.tabular_store.update_acl(doc_id, acl_tags)
 
     def publish_new_current(
         self,
@@ -393,30 +369,7 @@ class DocumentRepository:
         if prev_id and prev_id != report.doc_id:
             existing = self._doc_states.get(prev_id)
             if existing is not None:
-                self._doc_states[prev_id] = IngestionReport(
-                    doc_id=existing.doc_id,
-                    filename=existing.filename,
-                    status=IngestionState.SUPERSEDED,
-                    page_count=existing.page_count,
-                    chunk_count=existing.chunk_count,
-                    is_public=existing.is_public,
-                    tags=list(existing.tags),
-                    acl_tags=list(existing.acl_tags),
-                    uploaded_at=existing.uploaded_at,
-                    dynamic_concepts=list(existing.dynamic_concepts),
-                    concept_model=existing.concept_model,
-                    error_message=existing.error_message,
-                    source_key=existing.source_key,
-                    content_hash=existing.content_hash,
-                    doc_version=existing.doc_version,
-                    tenant=existing.tenant,
-                    is_current=False,
-                    supersedes_doc_id=existing.supersedes_doc_id,
-                    embedding_manifest=existing.embedding_manifest,
-                    parser_name=existing.parser_name,
-                    parser_degraded=existing.parser_degraded,
-                    parser_fallback_reason=existing.parser_fallback_reason,
-                )
+                self._doc_states[prev_id] = replace(existing, status=IngestionState.SUPERSEDED, is_current=False)
                 self._set_chunks_current(
                     prev_id, is_current=False, status=IngestionState.SUPERSEDED.value
                 )
@@ -447,8 +400,219 @@ class DocumentRepository:
         report = self._doc_states.get(doc_id)
         self.delete_chunks(doc_id)
         self.delete_upload_file(doc_id)
+        self.tabular_store.delete_tables(doc_id=doc_id)
         self._doc_states.pop(doc_id, None)
         if report and report.source_key and self._current_by_source_key.get(report.source_key) == doc_id:
             self._current_by_source_key.pop(report.source_key, None)
         self._persist_registry()
         return {"deleted": True, "doc_id": doc_id}
+
+    def save_tables(self, tables: Sequence[ParsedTable], *, doc_id: str, source_key: str, acl_tags: Sequence[str]) -> None:
+        """Store large-table rows for structured queries, replacing any earlier copy."""
+        self.tabular_store.delete_tables(doc_id=doc_id)
+        for table in tables:
+            self.tabular_store.save_table(table, doc_id=doc_id, source_key=source_key, acl_tags=acl_tags)
+
+    # --- Lineage and hard deletion ---------------------------------------
+
+    @staticmethod
+    def _lineage_query(source_keys: Sequence[str], subject_id: Optional[str]) -> Dict[str, Any]:
+        should: List[Dict[str, Any]] = []
+        if source_keys:
+            should.append({"terms": {"source_key": list(source_keys)}})
+        if subject_id:
+            should.append({"term": {"subject_ids": subject_id}})
+        return {"bool": {"should": should, "minimum_should_match": 1}}
+
+    @staticmethod
+    def _memory_matches(rec: Dict[str, Any], source_keys: Sequence[str], subject_id: Optional[str]) -> bool:
+        return rec.get("source_key") in source_keys or bool(subject_id and subject_id in (rec.get("subject_ids") or []))
+
+    def find_sources_by_subject(self, subject_id: str) -> Tuple[List[str], List[str]]:
+        """Return (declared, detected) source keys linked to a person."""
+        declared: set[str] = set()
+        detected: set[str] = set()
+        for report in self._doc_states.values():
+            if subject_id in report.subject_ids:
+                declared.add(report.source_key)
+            elif subject_id in report.detected_subject_ids:
+                detected.add(report.source_key)
+        # Registry and index can drift, so also ask the index directly.
+        for key in self._index_source_keys_for_subject(subject_id):
+            if key not in declared:
+                detected.add(key)
+        return sorted(declared), sorted(detected)
+
+    def _index_source_keys_for_subject(self, subject_id: str) -> List[str]:
+        if self.es_manager.is_online():
+            self.es_manager.ensure_index()
+            resp = self.es_manager.client.search(
+                index=self.es_manager.index_name,
+                size=0,
+                query={"term": {"subject_ids": subject_id}},
+                aggs={"sources": {"terms": {"field": "source_key", "size": 1000}}},
+            )
+            return [bucket["key"] for bucket in resp["aggregations"]["sources"]["buckets"]]
+        return sorted(
+            {
+                str(rec.get("source_key"))
+                for rec in self.es_manager.memory_chunks
+                if subject_id in (rec.get("subject_ids") or []) and rec.get("source_key")
+            }
+        )
+
+    def versions_for_sources(self, source_keys: Iterable[str]) -> List[IngestionReport]:
+        """Every registry entry for these sources, in any state, SUPERSEDED included."""
+        wanted = set(source_keys)
+        return [report for report in self._doc_states.values() if report.source_key in wanted]
+
+    def count_chunks(self, *, source_keys: Sequence[str], subject_id: Optional[str] = None) -> int:
+        if not source_keys and not subject_id:
+            return 0
+        if self.es_manager.is_online():
+            self.es_manager.ensure_index()
+            self.es_manager.client.indices.refresh(index=self.es_manager.index_name)
+            return int(
+                self.es_manager.client.count(
+                    index=self.es_manager.index_name,
+                    query=self._lineage_query(source_keys, subject_id),
+                )["count"]
+            )
+        return sum(1 for rec in self.es_manager.memory_chunks if self._memory_matches(rec, source_keys, subject_id))
+
+    def count_subject_mentions(self, subject_id: str, *, exclude_source_keys: Sequence[str] = ()) -> int:
+        """Full-text scan for a subject appearing in chunks lineage did not capture."""
+        needle = normalize_subject_id(subject_id)
+        if self.es_manager.is_online():
+            self.es_manager.ensure_index()
+            query: Dict[str, Any] = {"bool": {"must": [{"match_phrase": {"content": needle}}]}}
+            if exclude_source_keys:
+                query["bool"]["must_not"] = [{"terms": {"source_key": list(exclude_source_keys)}}]
+            return int(self.es_manager.client.count(index=self.es_manager.index_name, query=query)["count"])
+        return sum(
+            1
+            for rec in self.es_manager.memory_chunks
+            if needle in str(rec.get("content", "")).lower() and rec.get("source_key") not in exclude_source_keys
+        )
+
+    def delete_chunks_by_lineage(self, *, source_keys: Sequence[str], subject_id: Optional[str] = None) -> int:
+        """Delete by lineage, not doc_id, so orphans missing from the registry go too."""
+        removed = 0
+        if self.es_manager.is_online():
+            self.es_manager.ensure_index()
+            resp = self.es_manager.client.delete_by_query(
+                index=self.es_manager.index_name,
+                query=self._lineage_query(source_keys, subject_id),
+                refresh=True,
+                conflicts="proceed",
+            )
+            removed += int(resp.get("deleted", 0))
+        before = len(self.es_manager.memory_chunks)
+        self.es_manager.memory_chunks = [
+            rec for rec in self.es_manager.memory_chunks if not self._memory_matches(rec, source_keys, subject_id)
+        ]
+        return removed + before - len(self.es_manager.memory_chunks)
+
+    def expunge_deleted_documents(self) -> int:
+        """Try to merge deleted documents out of Lucene segments; return how many remain.
+
+        delete_by_query only hides documents. Their text stays on disk, and ES also holds
+        it under a soft-delete retention lease until the lease syncs (about 30 seconds on
+        an idle index), so a merge straight after the delete removes nothing. Callers must
+        check the returned count rather than assume the merge worked.
+        """
+        if not self.es_manager.is_online():
+            return 0
+        client, index = self.es_manager.client, self.es_manager.index_name
+        client.indices.flush(index=index)
+        client.indices.forcemerge(index=index, max_num_segments=1, wait_for_completion=True)
+        client.indices.refresh(index=index)
+        stats = client.indices.stats(index=index, metric="docs")
+        return int(stats["indices"][index]["primaries"]["docs"]["deleted"])
+
+    def count_upload_files(self, doc_id: str) -> int:
+        return sum(1 for _ in self.uploads_dir.glob(f"{doc_id}_*"))
+
+    def delete_upload_file_count(self, doc_id: str) -> int:
+        count = self.count_upload_files(doc_id)
+        self.delete_upload_file(doc_id)
+        return count
+
+    def forget_registry_entries(self, source_keys: Iterable[str]) -> None:
+        wanted = set(source_keys)
+        self._doc_states = {
+            doc_id: report for doc_id, report in self._doc_states.items() if report.source_key not in wanted
+        }
+        for key in wanted:
+            self._current_by_source_key.pop(key, None)
+        self._persist_registry()
+
+    def archive_source(self, source_key: str) -> int:
+        """Source-system archive: retain every version, remove them all from retrieval."""
+        versions = self.versions_for_sources([source_key])
+        for report in versions:
+            self._doc_states[report.doc_id] = replace(report, status=IngestionState.ARCHIVED, is_current=False)
+            self._set_chunks_current(report.doc_id, is_current=False, status=IngestionState.ARCHIVED.value)
+        self._current_by_source_key.pop(source_key, None)
+        self._persist_registry()
+        return len(versions)
+
+    # --- Tombstones and processed events ---------------------------------
+
+    def keyed_hash(self, value: str) -> str:
+        if self._erasure_key is None:
+            self._erasure_key = load_erasure_key(self._erasure_key_path)
+        return hash_with_key(self._erasure_key, value)
+
+    def add_tombstones(
+        self,
+        *,
+        request_id: str,
+        source_keys: Iterable[str],
+        content_hashes: Iterable[str],
+        subject_id: Optional[str] = None,
+    ) -> None:
+        for key in source_keys:
+            self._tombstones[self.keyed_hash(f"source:{key}")] = request_id
+        for digest in content_hashes:
+            self._tombstones[self.keyed_hash(f"content:{digest}")] = request_id
+        if subject_id:
+            self._tombstones[self.keyed_hash(f"subject:{subject_id}")] = request_id
+        self._persist_registry()
+
+    def assert_not_erased(
+        self,
+        *,
+        source_key: str = "",
+        content_hash: str = "",
+        subject_ids: Iterable[str] = (),
+    ) -> None:
+        """Refuse ingestion of anything a deletion request removed."""
+        if not self._tombstones:
+            return
+        checks = [
+            ("source", f"source:{source_key}", bool(source_key)),
+            ("content", f"content:{content_hash}", bool(content_hash)),
+        ] + [("data subject", f"subject:{normalize_subject_id(s)}", True) for s in subject_ids]
+        for label, value, enabled in checks:
+            request_id = self._tombstones.get(self.keyed_hash(value)) if enabled else None
+            if request_id:
+                raise ErasedSourceError(
+                    f"Blocked: this {label} was hard-deleted by erasure request {request_id}. "
+                    "Re-ingesting it would resurrect erased data."
+                )
+
+    def lift_tombstone(self, source_key: str) -> bool:
+        """Explicit, deliberate re-admission of a source, e.g. after redaction."""
+        removed = self._tombstones.pop(self.keyed_hash(f"source:{source_key}"), None) is not None
+        if removed:
+            self._persist_registry()
+        return removed
+
+    def has_processed_event(self, event_id: str) -> bool:
+        return event_id in self._processed_events
+
+    def record_processed_event(self, event_id: str) -> None:
+        self._processed_events.append(event_id)
+        del self._processed_events[:-MAX_PROCESSED_EVENTS]
+        self._persist_registry()

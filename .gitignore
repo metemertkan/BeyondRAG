@@ -12,6 +12,9 @@ workspace/uploads/*
 workspace/document_registry.json
 workspace/document_registry.tmp
 workspace/language_packs.json
+workspace/tabular_store.sqlite
+workspace/erasure_log.jsonl
+workspace/.erasure_key
 !workspace/.gitkeep
 
 # IDE & OS

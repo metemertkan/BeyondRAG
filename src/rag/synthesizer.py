@@ -6,12 +6,19 @@ and LLM-grounded synthesis (via Gemini or local Ollama).
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Final, List
+import json
+import logging
+from typing import Any, Callable, Dict, Final, List, Optional
 
 from langchain_core.prompts import ChatPromptTemplate
 
 from src.config import get_llm
 from src.rag.embeddings import STOPWORDS, has_cjk
+from src.rag.governance import DEFAULT_TRUST_TIER, SOURCE_PRECEDENCE_RULES, detect_conflicts
+from src.rag.multilingual import normalize_for_matching
+from src.rag.tabular_store import TableQuery
+
+logger = logging.getLogger(__name__)
 
 _EXTRA_IGNORED_TOKENS: Final[frozenset[str]] = frozenset(
     {
@@ -46,6 +53,30 @@ class GroundedAnswerSynthesizer:
 
     def __init__(self, llm_factory: Callable[..., Any] = get_llm) -> None:
         self._llm_factory = llm_factory
+        # Set per call: "llm" or "fast". Lets the eval gate detect a silent fallback.
+        self.last_mode_used = "fast"
+        # The exact sources the model was given, tool results and headers included.
+        self.last_context_parts: List[str] = []
+
+    def _run_table_query(
+        self,
+        question: str,
+        table_chunks: List[Dict[str, Any]],
+        table_query_runner: Callable[[TableQuery], Dict[str, Any]],
+    ) -> Optional[str]:
+        """Let the LLM fill in one structured table query, and format the rows as a source."""
+        descriptions = "\n\n".join(chunk["content"] for chunk in table_chunks)
+        planner = self._llm_factory(role="manager", temperature=0.0).with_structured_output(TableQuery)
+        plan = planner.invoke(
+            "Fill in a structured query that answers the question from one of these tables. "
+            "Column names must match exactly. Use an aggregate for totals or averages.\n\n"
+            f"Tables:\n{descriptions}\n\nQuestion: {question}"
+        )
+        result = table_query_runner(plan)
+        return (
+            f"Source: table {result['name']} (structured query result, authoritative for this table)\n"
+            f"Content: {json.dumps(result, ensure_ascii=False, default=str)}"
+        )
 
     def synthesize(
         self,
@@ -57,7 +88,10 @@ class GroundedAnswerSynthesizer:
         authorized_chunks: List[Dict[str, Any]],
         masked_restricted_docs: List[Dict[str, Any]],
         synthesis_mode: str = "fast",
+        table_query_runner: Optional[Callable[[TableQuery], Dict[str, Any]]] = None,
     ) -> str:
+        self.last_mode_used = "fast"
+        self.last_context_parts = []
         role_display = (
             ", ".join(f"`{r}`" for r in user_roles)
             if user_roles
@@ -73,6 +107,7 @@ class GroundedAnswerSynthesizer:
             and not has_cjk(w)
         }
 
+        q_tokens = {normalize_for_matching(tok) for tok in q_tokens}
         relevant_chunks = [
             c
             for c in authorized_chunks
@@ -80,7 +115,7 @@ class GroundedAnswerSynthesizer:
             or sum(
                 1
                 for tok in q_tokens
-                if tok in c["content"].lower() or tok in c["filename"].lower()
+                if tok in normalize_for_matching(c["content"]).lower() or tok in c["filename"].lower()
             )
             >= max(1, min(2, len(q_tokens)))
         ]
@@ -97,11 +132,24 @@ class GroundedAnswerSynthesizer:
 
         if synthesis_mode == "llm":
             try:
-                context_str = "\n\n".join(
-                    f"Source: {c['filename']} (Page {c['page_number']}, Tags: {c['tags'] or ['PUBLIC']})\n"
+                context_parts = [
+                    f"Source: {c['filename']} (Page {c['page_number']}, Tags: {c['tags'] or ['PUBLIC']}, "
+                    f"Trust tier: {c.get('trust_tier') or DEFAULT_TRUST_TIER}, "
+                    f"Effective: {c.get('effective_date') or 'unknown'})\n"
                     f"Content: {c['content']}"
                     for c in relevant_chunks
-                )
+                ]
+                table_chunks = [c for c in relevant_chunks if c.get("block_type") == "table_summary"]
+                if table_chunks and table_query_runner is not None:
+                    try:
+                        table_source = self._run_table_query(question, table_chunks, table_query_runner)
+                        if table_source:
+                            context_parts.insert(0, table_source)
+                    except Exception as exc:
+                        # The summary chunk is still in context, so the answer can proceed.
+                        logger.warning("Structured table query failed: %s", exc)
+                self.last_context_parts = list(context_parts)
+                context_str = "\n\n".join(context_parts)
                 # Language choice is query-driven — no hardcoded language-pair instruction map.
                 lang_instruction = (
                     "Respond in the same language as the user's question in 2 concise "
@@ -112,7 +160,7 @@ class GroundedAnswerSynthesizer:
                         (
                             "system",
                             "You are the BeyondRAG enterprise assistant. Answer concisely using ONLY "
-                            f"the authorized chunks. {lang_instruction}",
+                            f"the authorized chunks. {lang_instruction}\n\n{SOURCE_PRECEDENCE_RULES}",
                         ),
                         (
                             "human",
@@ -133,11 +181,19 @@ class GroundedAnswerSynthesizer:
                 )
                 content = str(getattr(resp, "content", resp)).strip()
                 if content:
+                    self.last_mode_used = "llm"
                     return content
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("LLM synthesis failed; using the fast citation answer: %s", exc)
 
+        conflicts = detect_conflicts(relevant_chunks)
         top = relevant_chunks[0]
+        # When sources disagree, the fast answer must quote the one that wins on precedence.
+        for conflict in conflicts:
+            winner = conflict["winner"]
+            if winner:
+                top = next((c for c in relevant_chunks if c.get("chunk_id") == winner["chunk_id"]), top)
+                break
         tag_label = "PUBLIC" if top["is_public"] else ", ".join(top["tags"])
         raw_text = top["content"]
         if "(Page 1)" in raw_text:
@@ -150,8 +206,17 @@ class GroundedAnswerSynthesizer:
             if is_cjk_query
             else "✅ **Authorized Match Retrieved**"
         )
-        return (
+        answer = (
             f"{banner}\n"
             f"📄 `{top['filename']}` *(Role: `{tag_label}`)*\n"
             f"💡 {raw_text[:155]}..."
         )
+        for conflict in conflicts:
+            sources = " vs ".join(f"`{s['filename']}`" for s in conflict["sources"])
+            outcome = (
+                f"using `{conflict['winner']['filename']}`: {conflict['reason']}"
+                if conflict["winner"]
+                else f"unresolved: {conflict['reason']}"
+            )
+            answer += f"\n⚠️ **Conflicting sources** ({sources}), {outcome}"
+        return answer
