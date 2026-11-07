@@ -13,6 +13,26 @@
     {
       "label": "[Operation] 葵青碼頭SLA",
       "query": "葵青貨櫃碼頭的準時調度SLA和冷鏈溫度是多少？"
+    },
+    {
+      "label": "[Lab] Exact code",
+      "query": "What should I do about error ERR-1393?"
+    },
+    {
+      "label": "[Lab] Vague question",
+      "query": "app keeps crashing on login"
+    },
+    {
+      "label": "[Lab] Multi-hop",
+      "query": "What was the revenue in Europe from the product we launched in Q3?"
+    },
+    {
+      "label": "[Lab] Buried answer",
+      "query": "How many quotes are needed before onboarding a new vendor?"
+    },
+    {
+      "label": "[Lab] Re-rank",
+      "query": "How much does the Aurora router cost?"
     }
   ]
 }

@@ -1,0 +1,353 @@
+[
+ {
+  "filename": "runbook-auth-timeout.md",
+  "text": "Authentication Service Timeout Exceptions. Token validation calls to the identity provider exceed the 3 second deadline under load, and the client receives HTTP 504.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-tls-expiry.md",
+  "text": "TLS Certificate Rotation Failure. The load balancer serves an expired leaf certificate after the renewal job fails, and clients reject the handshake.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-oom-kill.md",
+  "text": "Container Memory Limit Exceeded. The kernel out-of-memory killer terminates the worker when resident set size passes the cgroup limit.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-deadlock.md",
+  "text": "Database Lock Contention and Deadlock Resolution. Concurrent transactions acquire row locks in opposite order, and the engine aborts one as the victim.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-dns-ttl.md",
+  "text": "DNS Propagation Delay After Failover. Resolvers cache the old record until the time-to-live expires, so traffic keeps reaching the drained region.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-n-plus-one.md",
+  "text": "Unbounded ORM Query Fan-out. Lazy loading issues one additional select per parent row, which multiplies database round trips on list endpoints.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-clock-skew.md",
+  "text": "NTP Clock Skew and Signature Validation. A host clock drifting beyond the allowed window makes request signatures appear expired.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-disk-inode.md",
+  "text": "Inode Exhaustion on Log Volumes. Millions of small rotated files consume all inodes while free block capacity remains available.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-cors.md",
+  "text": "Cross-Origin Resource Sharing Preflight Rejection. The gateway omits the allow-origin header on OPTIONS requests, so browsers block the response.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-retry-storm.md",
+  "text": "Retry Amplification During Partial Outage. Clients without exponential backoff multiply load on a degraded dependency, which prolongs the incident.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-index-bloat.md",
+  "text": "Stale Query Planner Statistics. Outdated table statistics make the optimizer choose a sequential scan over an available index.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-sso-saml.md",
+  "text": "SAML Assertion Audience Mismatch. The identity provider issues assertions for a different entity identifier, so the service provider rejects them.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-webhook-sig.md",
+  "text": "Webhook HMAC Verification Failure. Body normalization by a proxy changes the raw payload bytes, which invalidates the computed digest.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-gc-pause.md",
+  "text": "Stop-the-World Garbage Collection Pauses. Old generation heap pressure triggers long collector pauses that exceed the health check deadline.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-conn-pool.md",
+  "text": "Database Connection Pool Exhaustion. Long transactions hold connections until new requests queue and hit the acquisition timeout.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-cache-stampede.md",
+  "text": "Cache Stampede on Key Expiry. Many concurrent misses for one popular key recompute the same value and overload the origin.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-timezone.md",
+  "text": "UTC Offset Handling in Scheduled Jobs. Daylight saving transitions shift the local schedule, so jobs run twice or are skipped.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-utf8.md",
+  "text": "Character Encoding Mismatch in CSV Import. Latin-1 input decoded as UTF-8 produces replacement characters in customer names.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-feature-flag.md",
+  "text": "Stale Feature Flag Evaluation. The SDK serves its cached ruleset when the flag service is unreachable, so targeting changes do not apply.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-pagination.md",
+  "text": "Offset Pagination Drift Under Concurrent Writes. Inserts between page requests shift rows, which causes duplicates and omissions.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-kafka-lag.md",
+  "text": "Consumer Group Rebalance Lag. Frequent rebalances pause partition consumption, and offset lag grows until processing falls behind.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-s3-consistency.md",
+  "text": "Presigned URL Expiry for Object Storage. Download links signed with a short lifetime return 403 once the validity window ends.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-idempotency.md",
+  "text": "Missing Idempotency Keys on Payment Retries. A client retry after a timeout creates a second charge because the server can't detect the duplicate.",
+  "tags": []
+ },
+ {
+  "filename": "runbook-log-sampling.md",
+  "text": "Trace Sampling Drops Rare Failures. Head-based sampling discards most spans before the outcome is known, so rare errors never reach the backend.",
+  "tags": []
+ },
+ {
+  "filename": "err-err-1390.md",
+  "text": "This section applies to all regional entities and is reviewed by the governance committee every year. Staff complete the related training module when they join, and again whenever the policy changes materially. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Error ERR-1390 is raised by the session manager. To resolve it, increase the limit and check the logs. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Staff complete the related training module when they join, and again whenever the policy changes materially. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Questions about how this applies to a specific case should go to the policy owner named in the appendix.",
+  "tags": []
+ },
+ {
+  "filename": "err-err-1391.md",
+  "text": "This section applies to all regional entities and is reviewed by the governance committee every year. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Changes to this section take effect thirty days after publication unless the notice states another date. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Error ERR-1391 is raised by the file uploader. To resolve it, rotate the credential and check the logs. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Exceptions require written approval and must be recorded in the central register before the work begins. This section applies to all regional entities and is reviewed by the governance committee every year. Changes to this section take effect thirty days after publication unless the notice states another date.",
+  "tags": []
+ },
+ {
+  "filename": "err-err-1392.md",
+  "text": "Internal audit samples compliance with this section as part of the annual assurance plan for each region. Staff complete the related training module when they join, and again whenever the policy changes materially. Changes to this section take effect thirty days after publication unless the notice states another date. Teams should keep supporting records for seven years, in line with the group retention schedule. Error ERR-1392 is raised by the session manager. To resolve it, rotate the credential and check the logs. Teams should keep supporting records for seven years, in line with the group retention schedule. Questions about how this applies to a specific case should go to the policy owner named in the appendix. This section applies to all regional entities and is reviewed by the governance committee every year. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference.",
+  "tags": []
+ },
+ {
+  "filename": "err-err-1393.md",
+  "text": "This section applies to all regional entities and is reviewed by the governance committee every year. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Exceptions require written approval and must be recorded in the central register before the work begins. Teams should keep supporting records for seven years, in line with the group retention schedule. Error ERR-1393 is raised by the payment gateway. To resolve it, rotate the credential and check the logs. Staff complete the related training module when they join, and again whenever the policy changes materially. This section applies to all regional entities and is reviewed by the governance committee every year. Changes to this section take effect thirty days after publication unless the notice states another date. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference.",
+  "tags": []
+ },
+ {
+  "filename": "err-err-1394.md",
+  "text": "This section applies to all regional entities and is reviewed by the governance committee every year. Changes to this section take effect thirty days after publication unless the notice states another date. Staff complete the related training module when they join, and again whenever the policy changes materially. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Error ERR-1394 is raised by the billing service. To resolve it, increase the limit and check the logs. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Teams should keep supporting records for seven years, in line with the group retention schedule. Staff complete the related training module when they join, and again whenever the policy changes materially. Questions about how this applies to a specific case should go to the policy owner named in the appendix.",
+  "tags": []
+ },
+ {
+  "filename": "err-err-1395.md",
+  "text": "Exceptions require written approval and must be recorded in the central register before the work begins. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Teams should keep supporting records for seven years, in line with the group retention schedule. This section applies to all regional entities and is reviewed by the governance committee every year. Error ERR-1395 is raised by the inventory sync. To resolve it, rotate the credential and check the logs. Staff complete the related training module when they join, and again whenever the policy changes materially. Teams should keep supporting records for seven years, in line with the group retention schedule. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Exceptions require written approval and must be recorded in the central register before the work begins.",
+  "tags": []
+ },
+ {
+  "filename": "err-err-1396.md",
+  "text": "Exceptions require written approval and must be recorded in the central register before the work begins. Teams should keep supporting records for seven years, in line with the group retention schedule. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Error ERR-1396 is raised by the billing service. To resolve it, increase the limit and check the logs. Internal audit samples compliance with this section as part of the annual assurance plan for each region. This section applies to all regional entities and is reviewed by the governance committee every year. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference.",
+  "tags": []
+ },
+ {
+  "filename": "err-err-1397.md",
+  "text": "Teams should keep supporting records for seven years, in line with the group retention schedule. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. This section applies to all regional entities and is reviewed by the governance committee every year. Exceptions require written approval and must be recorded in the central register before the work begins. Error ERR-1397 is raised by the billing service. To resolve it, clear the queue and check the logs. Staff complete the related training module when they join, and again whenever the policy changes materially. This section applies to all regional entities and is reviewed by the governance committee every year. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Changes to this section take effect thirty days after publication unless the notice states another date.",
+  "tags": []
+ },
+ {
+  "filename": "err-err-1398.md",
+  "text": "This section applies to all regional entities and is reviewed by the governance committee every year. Exceptions require written approval and must be recorded in the central register before the work begins. Changes to this section take effect thirty days after publication unless the notice states another date. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Error ERR-1398 is raised by the file uploader. To resolve it, roll back the release and check the logs. Exceptions require written approval and must be recorded in the central register before the work begins. Changes to this section take effect thirty days after publication unless the notice states another date. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. This section applies to all regional entities and is reviewed by the governance committee every year.",
+  "tags": []
+ },
+ {
+  "filename": "err-err-1399.md",
+  "text": "Changes to this section take effect thirty days after publication unless the notice states another date. Teams should keep supporting records for seven years, in line with the group retention schedule. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Error ERR-1399 is raised by the search index. To resolve it, restart the worker and check the logs. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Questions about how this applies to a specific case should go to the policy owner named in the appendix. This section applies to all regional entities and is reviewed by the governance committee every year.",
+  "tags": []
+ },
+ {
+  "filename": "sku-acme-x852.md",
+  "text": "Exceptions require written approval and must be recorded in the central register before the work begins. Questions about how this applies to a specific case should go to the policy owner named in the appendix. This section applies to all regional entities and is reviewed by the governance committee every year. Teams should keep supporting records for seven years, in line with the group retention schedule. The ACME-X852 battery pack costs 449 dollars and weighs 1 kilograms. It pairs with the ZENTA-X569 adapter and the ACME-X853 bracket. Teams should keep supporting records for seven years, in line with the group retention schedule. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Changes to this section take effect thirty days after publication unless the notice states another date. Exceptions require written approval and must be recorded in the central register before the work begins.",
+  "tags": []
+ },
+ {
+  "filename": "sku-acme-x569.md",
+  "text": "Questions about how this applies to a specific case should go to the policy owner named in the appendix. Teams should keep supporting records for seven years, in line with the group retention schedule. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Changes to this section take effect thirty days after publication unless the notice states another date. The ACME-X569 gateway costs 341 dollars and weighs 6 kilograms. It pairs with the ZENTA-X864 adapter and the ACME-X570 bracket. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Exceptions require written approval and must be recorded in the central register before the work begins. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Staff complete the related training module when they join, and again whenever the policy changes materially.",
+  "tags": []
+ },
+ {
+  "filename": "sku-acme-x864.md",
+  "text": "Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Changes to this section take effect thirty days after publication unless the notice states another date. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Teams should keep supporting records for seven years, in line with the group retention schedule. The ACME-X864 sensor costs 720 dollars and weighs 3 kilograms. It pairs with the ZENTA-X588 adapter and the ACME-X865 bracket. This section applies to all regional entities and is reviewed by the governance committee every year. Changes to this section take effect thirty days after publication unless the notice states another date. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Internal audit samples compliance with this section as part of the annual assurance plan for each region.",
+  "tags": []
+ },
+ {
+  "filename": "sku-acme-x588.md",
+  "text": "Questions about how this applies to a specific case should go to the policy owner named in the appendix. This section applies to all regional entities and is reviewed by the governance committee every year. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Exceptions require written approval and must be recorded in the central register before the work begins. The ACME-X588 router costs 514 dollars and weighs 6 kilograms. It pairs with the ZENTA-X946 adapter and the ACME-X589 bracket. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Exceptions require written approval and must be recorded in the central register before the work begins. Questions about how this applies to a specific case should go to the policy owner named in the appendix.",
+  "tags": []
+ },
+ {
+  "filename": "sku-acme-x946.md",
+  "text": "Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Exceptions require written approval and must be recorded in the central register before the work begins. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Staff complete the related training module when they join, and again whenever the policy changes materially. The ACME-X946 scanner costs 366 dollars and weighs 10 kilograms. It pairs with the ZENTA-X154 adapter and the ACME-X947 bracket. Changes to this section take effect thirty days after publication unless the notice states another date. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Staff complete the related training module when they join, and again whenever the policy changes materially. Exceptions require written approval and must be recorded in the central register before the work begins.",
+  "tags": []
+ },
+ {
+  "filename": "sku-acme-x154.md",
+  "text": "This section applies to all regional entities and is reviewed by the governance committee every year. Changes to this section take effect thirty days after publication unless the notice states another date. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. The ACME-X154 gateway costs 398 dollars and weighs 8 kilograms. It pairs with the ZENTA-X182 adapter and the ACME-X155 bracket. Changes to this section take effect thirty days after publication unless the notice states another date. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Staff complete the related training module when they join, and again whenever the policy changes materially.",
+  "tags": []
+ },
+ {
+  "filename": "sku-acme-x182.md",
+  "text": "Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Questions about how this applies to a specific case should go to the policy owner named in the appendix. This section applies to all regional entities and is reviewed by the governance committee every year. Changes to this section take effect thirty days after publication unless the notice states another date. The ACME-X182 gateway costs 860 dollars and weighs 6 kilograms. It pairs with the ZENTA-X596 adapter and the ACME-X183 bracket. Changes to this section take effect thirty days after publication unless the notice states another date. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Questions about how this applies to a specific case should go to the policy owner named in the appendix. This section applies to all regional entities and is reviewed by the governance committee every year.",
+  "tags": []
+ },
+ {
+  "filename": "sku-acme-x596.md",
+  "text": "This section applies to all regional entities and is reviewed by the governance committee every year. Teams should keep supporting records for seven years, in line with the group retention schedule. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. The ACME-X596 battery pack costs 803 dollars and weighs 7 kilograms. It pairs with the ZENTA-X793 adapter and the ACME-X597 bracket. This section applies to all regional entities and is reviewed by the governance committee every year. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Teams should keep supporting records for seven years, in line with the group retention schedule.",
+  "tags": []
+ },
+ {
+  "filename": "sku-acme-x793.md",
+  "text": "Teams should keep supporting records for seven years, in line with the group retention schedule. Exceptions require written approval and must be recorded in the central register before the work begins. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Changes to this section take effect thirty days after publication unless the notice states another date. The ACME-X793 battery pack costs 831 dollars and weighs 11 kilograms. It pairs with the ZENTA-X692 adapter and the ACME-X794 bracket. Staff complete the related training module when they join, and again whenever the policy changes materially. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Exceptions require written approval and must be recorded in the central register before the work begins.",
+  "tags": []
+ },
+ {
+  "filename": "sku-acme-x692.md",
+  "text": "Internal audit samples compliance with this section as part of the annual assurance plan for each region. Changes to this section take effect thirty days after publication unless the notice states another date. Questions about how this applies to a specific case should go to the policy owner named in the appendix. This section applies to all regional entities and is reviewed by the governance committee every year. The ACME-X692 gateway costs 447 dollars and weighs 10 kilograms. It pairs with the ZENTA-X888 adapter and the ACME-X693 bracket. Questions about how this applies to a specific case should go to the policy owner named in the appendix. This section applies to all regional entities and is reviewed by the governance committee every year. Exceptions require written approval and must be recorded in the central register before the work begins. Staff complete the related training module when they join, and again whenever the policy changes materially.",
+  "tags": []
+ },
+ {
+  "filename": "sku-acme-x888.md",
+  "text": "Questions about how this applies to a specific case should go to the policy owner named in the appendix. Internal audit samples compliance with this section as part of the annual assurance plan for each region. This section applies to all regional entities and is reviewed by the governance committee every year. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. The ACME-X888 controller costs 259 dollars and weighs 1 kilograms. It pairs with the ZENTA-X974 adapter and the ACME-X889 bracket. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Teams should keep supporting records for seven years, in line with the group retention schedule. Staff complete the related training module when they join, and again whenever the policy changes materially. Internal audit samples compliance with this section as part of the annual assurance plan for each region.",
+  "tags": []
+ },
+ {
+  "filename": "sku-acme-x974.md",
+  "text": "Teams should keep supporting records for seven years, in line with the group retention schedule. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Staff complete the related training module when they join, and again whenever the policy changes materially. Changes to this section take effect thirty days after publication unless the notice states another date. The ACME-X974 controller costs 222 dollars and weighs 4 kilograms. It pairs with the ZENTA-X740 adapter and the ACME-X975 bracket. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Teams should keep supporting records for seven years, in line with the group retention schedule. Staff complete the related training module when they join, and again whenever the policy changes materially. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference.",
+  "tags": []
+ },
+ {
+  "filename": "policy-section-1.md",
+  "text": "Section 1: travel approval. This section sets the rules for travel approval across the group, and answers the common question: How much can a manager approve for one business trip? Exceptions require written approval and must be recorded in the central register before the work begins. This section applies to all regional entities and is reviewed by the governance committee every year. Staff complete the related training module when they join, and again whenever the policy changes materially. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Teams should keep supporting records for seven years, in line with the group retention schedule. Exceptions require written approval and must be recorded in the central register before the work begins. Exceptions require written approval and must be recorded in the central register before the work begins. Internal audit samples compliance with this section as part of the annual assurance plan for each region. This section applies to all regional entities and is reviewed by the governance committee every year. A line manager may approve a single trip of up to HKD 18,000. This section applies to all regional entities and is reviewed by the governance committee every year. Exceptions require written approval and must be recorded in the central register before the work begins. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Questions about how this applies to a specific case should go to the policy owner named in the appendix.",
+  "tags": []
+ },
+ {
+  "filename": "policy-section-2.md",
+  "text": "Section 2: laptop replacement. This section sets the rules for laptop replacement across the group, and answers the common question: How often are staff laptops replaced? This section applies to all regional entities and is reviewed by the governance committee every year. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Changes to this section take effect thirty days after publication unless the notice states another date. Staff complete the related training module when they join, and again whenever the policy changes materially. This section applies to all regional entities and is reviewed by the governance committee every year. Teams should keep supporting records for seven years, in line with the group retention schedule. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Standard laptops are replaced every 42 months. Staff complete the related training module when they join, and again whenever the policy changes materially. Teams should keep supporting records for seven years, in line with the group retention schedule. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference.",
+  "tags": []
+ },
+ {
+  "filename": "policy-section-3.md",
+  "text": "Section 3: vendor onboarding. This section sets the rules for vendor onboarding across the group, and answers the common question: How many quotes are needed before onboarding a new vendor? Exceptions require written approval and must be recorded in the central register before the work begins. Exceptions require written approval and must be recorded in the central register before the work begins. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Exceptions require written approval and must be recorded in the central register before the work begins. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Staff complete the related training module when they join, and again whenever the policy changes materially. This section applies to all regional entities and is reviewed by the governance committee every year. Changes to this section take effect thirty days after publication unless the notice states another date. Exceptions require written approval and must be recorded in the central register before the work begins. Three competing quotes are mandatory for new vendors. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Exceptions require written approval and must be recorded in the central register before the work begins. Staff complete the related training module when they join, and again whenever the policy changes materially. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference.",
+  "tags": []
+ },
+ {
+  "filename": "policy-section-4.md",
+  "text": "Section 4: data retention. This section sets the rules for data retention across the group, and answers the common question: How long is customer chat history kept? Questions about how this applies to a specific case should go to the policy owner named in the appendix. Exceptions require written approval and must be recorded in the central register before the work begins. This section applies to all regional entities and is reviewed by the governance committee every year. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Staff complete the related training module when they join, and again whenever the policy changes materially. Exceptions require written approval and must be recorded in the central register before the work begins. Questions about how this applies to a specific case should go to the policy owner named in the appendix. Exceptions require written approval and must be recorded in the central register before the work begins. Internal audit samples compliance with this section as part of the annual assurance plan for each region. Staff complete the related training module when they join, and again whenever the policy changes materially. Customer chat history is deleted after 26 months. Changes to this section take effect thirty days after publication unless the notice states another date. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference. Teams should keep supporting records for seven years, in line with the group retention schedule. Local regulation takes precedence where it is stricter, and the regional lead documents any such difference.",
+  "tags": []
+ },
+ {
+  "filename": "launch-q1.md",
+  "text": "Q1 launch review. The product we launched in Q1 was Orion, after an eight month development cycle and a staged rollout.",
+  "tags": []
+ },
+ {
+  "filename": "launch-q2.md",
+  "text": "Q2 launch review. The product we launched in Q2 was Vega, after an eight month development cycle and a staged rollout.",
+  "tags": []
+ },
+ {
+  "filename": "launch-q3.md",
+  "text": "Q3 launch review. The product we launched in Q3 was Helios, after an eight month development cycle and a staged rollout.",
+  "tags": []
+ },
+ {
+  "filename": "launch-q4.md",
+  "text": "Q4 launch review. The product we launched in Q4 was Lyra, after an eight month development cycle and a staged rollout.",
+  "tags": []
+ },
+ {
+  "filename": "revenue-orion-europe.md",
+  "text": "Regional revenue report. Orion revenue in Europe was EUR 4,200,000 this financial year, with growth driven by enterprise renewals.",
+  "tags": [
+   "finance"
+  ]
+ },
+ {
+  "filename": "revenue-vega-europe.md",
+  "text": "Regional revenue report. Vega revenue in Europe was EUR 1,150,000 this financial year, with growth driven by enterprise renewals.",
+  "tags": [
+   "finance"
+  ]
+ },
+ {
+  "filename": "revenue-helios-europe.md",
+  "text": "Regional revenue report. Helios revenue in Europe was EUR 2,760,000 this financial year, with growth driven by enterprise renewals.",
+  "tags": [
+   "finance"
+  ]
+ },
+ {
+  "filename": "revenue-lyra-europe.md",
+  "text": "Regional revenue report. Lyra revenue in Europe was EUR 980,000 this financial year, with growth driven by enterprise renewals.",
+  "tags": [
+   "finance"
+  ]
+ },
+ {
+  "filename": "revenue-orion-asia.md",
+  "text": "Regional revenue report. Orion revenue in Asia was USD 3,100,000 this financial year, with growth driven by enterprise renewals.",
+  "tags": [
+   "finance"
+  ]
+ },
+ {
+  "filename": "revenue-vega-asia.md",
+  "text": "Regional revenue report. Vega revenue in Asia was USD 2,450,000 this financial year, with growth driven by enterprise renewals.",
+  "tags": [
+   "finance"
+  ]
+ },
+ {
+  "filename": "revenue-helios-asia.md",
+  "text": "Regional revenue report. Helios revenue in Asia was USD 1,880,000 this financial year, with growth driven by enterprise renewals.",
+  "tags": [
+   "finance"
+  ]
+ },
+ {
+  "filename": "revenue-lyra-asia.md",
+  "text": "Regional revenue report. Lyra revenue in Asia was USD 640,000 this financial year, with growth driven by enterprise renewals.",
+  "tags": [
+   "finance"
+  ]
+ },
+ {
+  "filename": "aurora-history.md",
+  "text": "The history of the Aurora router began in 2014, when a small team in Eindhoven built the first prototype. The Aurora router line grew across Europe, and the original Aurora design won an industry award.",
+  "tags": []
+ },
+ {
+  "filename": "aurora-launch.md",
+  "text": "The Aurora router launch event drew 400 partners. Press coverage of the Aurora router focused on its design, its founders and the story behind the Aurora name.",
+  "tags": []
+ },
+ {
+  "filename": "aurora-reviews.md",
+  "text": "Reviews of the Aurora router praise its build quality. Analysts compare the Aurora router favorably with rivals and expect the Aurora brand to keep growing.",
+  "tags": []
+ },
+ {
+  "filename": "aurora-support.md",
+  "text": "Aurora router support is available in eleven languages. Owners of an Aurora router can register the device online and join the Aurora community forum.",
+  "tags": []
+ },
+ {
+  "filename": "catalog-sheet-7.md",
+  "text": "Catalog sheet 7. The list price is 289 dollars per unit for the AR-7 model, sold under the Aurora name, with volume discounts from 50 units.",
+  "tags": []
+ }
+]

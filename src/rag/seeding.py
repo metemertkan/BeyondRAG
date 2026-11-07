@@ -7,6 +7,8 @@ into the RAG knowledge base without coupling demo fixtures to the domain service
 from __future__ import annotations
 
 import io
+import json
+from pathlib import Path
 from typing import Any, Dict, Final, List, Protocol
 
 from reportlab.lib.pagesizes import A4
@@ -157,3 +159,23 @@ class DemoDocumentSeeder:
             seeded.append(meta)
 
         return seeded
+
+
+LAB_DOCUMENTS_PATH: Final[Path] = Path(__file__).resolve().parents[2] / "config" / "ep3_demo_docs.json"
+
+
+def seed_lab_documents(service: _SeedTarget, path: Path = LAB_DOCUMENTS_PATH) -> List[Dict[str, Any]]:
+    """Ingest the Retrieval Lab corpus. Skips what is already there, so it can be run again."""
+    existing = {d["filename"] for d in service.list_documents()}
+    seeded: List[Dict[str, Any]] = []
+    for document in json.loads(path.read_text(encoding="utf-8")):
+        if document["filename"] not in existing:
+            seeded.append(
+                service.ingest_pdf_bytes(
+                    filename=document["filename"],
+                    pdf_bytes=document["text"].encode("utf-8"),
+                    tags=document["tags"],
+                    extract_concepts=False,  # English documents, so loading stays quick.
+                )
+            )
+    return seeded

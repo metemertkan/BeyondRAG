@@ -14,8 +14,9 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from src.config import get_llm
 from src.rag.embeddings import STOPWORDS, has_cjk
+from src.rag.fusion import reorder_for_attention
 from src.rag.governance import DEFAULT_TRUST_TIER, SOURCE_PRECEDENCE_RULES, detect_conflicts
-from src.rag.multilingual import normalize_for_matching
+from src.rag.multilingual import normalize_for_matching, split_sentences
 from src.rag.tabular_store import TableQuery
 
 logger = logging.getLogger(__name__)
@@ -48,11 +49,24 @@ _BANNER_PREFIXES: Final[tuple[str, ...]] = (
 )
 
 
+def _best_snippet(text: str, tokens: set[str]) -> str:
+    """Start the quote at the sentence that best matches the query, not at the top of a long parent."""
+    sentences = split_sentences(text)
+    if len(sentences) < 2 or not tokens:
+        return text
+    def overlap(sentence: str) -> int:
+        lowered = normalize_for_matching(sentence).lower()
+        return sum(1 for token in tokens if token in lowered)
+    best = max(range(len(sentences)), key=lambda index: (overlap(sentences[index]), -index))
+    return " ".join(sentences[best:]) if overlap(sentences[best]) else text
+
+
 class GroundedAnswerSynthesizer:
     """Synthesizes RBAC-aware and cross-lingual grounded answers from authorized chunks."""
 
-    def __init__(self, llm_factory: Callable[..., Any] = get_llm) -> None:
+    def __init__(self, llm_factory: Callable[..., Any] = get_llm, *, reorder_context: bool = True) -> None:
         self._llm_factory = llm_factory
+        self._reorder_context = reorder_context
         # Set per call: "llm" or "fast". Lets the eval gate detect a silent fallback.
         self.last_mode_used = "fast"
         # The exact sources the model was given, tool results and headers included.
@@ -89,7 +103,10 @@ class GroundedAnswerSynthesizer:
         masked_restricted_docs: List[Dict[str, Any]],
         synthesis_mode: str = "fast",
         table_query_runner: Optional[Callable[[TableQuery], Dict[str, Any]]] = None,
+        ranked_by_model: bool = False,
     ) -> str:
+        """``ranked_by_model`` means a cross-encoder or planner chose these chunks, so a chunk
+        that shares no words with the question is still relevant and must not be filtered out."""
         self.last_mode_used = "fast"
         self.last_context_parts = []
         role_display = (
@@ -111,7 +128,8 @@ class GroundedAnswerSynthesizer:
         relevant_chunks = [
             c
             for c in authorized_chunks
-            if not q_tokens
+            if ranked_by_model
+            or not q_tokens
             or sum(
                 1
                 for tok in q_tokens
@@ -132,12 +150,15 @@ class GroundedAnswerSynthesizer:
 
         if synthesis_mode == "llm":
             try:
+                # Models attend most to the start and end of a long context, so the
+                # strongest chunks go at the edges and the weakest in the middle.
+                ordered = reorder_for_attention(relevant_chunks) if self._reorder_context else relevant_chunks
                 context_parts = [
                     f"Source: {c['filename']} (Page {c['page_number']}, Tags: {c['tags'] or ['PUBLIC']}, "
                     f"Trust tier: {c.get('trust_tier') or DEFAULT_TRUST_TIER}, "
                     f"Effective: {c.get('effective_date') or 'unknown'})\n"
                     f"Content: {c['content']}"
-                    for c in relevant_chunks
+                    for c in ordered
                 ]
                 table_chunks = [c for c in relevant_chunks if c.get("block_type") == "table_summary"]
                 if table_chunks and table_query_runner is not None:
@@ -209,9 +230,12 @@ class GroundedAnswerSynthesizer:
         answer = (
             f"{banner}\n"
             f"📄 `{top['filename']}` *(Role: `{tag_label}`)*\n"
-            f"💡 {raw_text[:155]}..."
+            f"💡 {_best_snippet(raw_text, q_tokens)[:155]}..."
         )
         for conflict in conflicts:
+            # Only conflicts about the source being quoted belong in this answer.
+            if top["filename"] not in {s["filename"] for s in conflict["sources"]}:
+                continue
             sources = " vs ".join(f"`{s['filename']}`" for s in conflict["sources"])
             outcome = (
                 f"using `{conflict['winner']['filename']}`: {conflict['reason']}"

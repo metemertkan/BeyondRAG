@@ -32,6 +32,10 @@ fixtures = [
     "arabic-reshaper>=3.0.0",
     "python-bidi>=0.6.0",
 ]
+# Cross-encoder re-ranking. Local ONNX model, downloaded on first use.
+rerank = [
+    "fastembed>=0.6.0",
+]
 # Scanned-page OCR. Large install, so opt-in (see RAG_OCR_LANGS).
 ocr = [
     "paddleocr>=3.0.0,<4",

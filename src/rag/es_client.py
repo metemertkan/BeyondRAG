@@ -7,6 +7,7 @@ when running offline in unit tests.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, Final, List
 
 from elasticsearch import Elasticsearch
@@ -16,6 +17,31 @@ from src.rag.embeddings import EMBEDDING_DIMS
 from src.rag.profiles import DEFAULT_INDEX_PREFIX, IndexTenantStrategy
 
 KB_INDEX_NAME: Final[str] = DEFAULT_INDEX_PREFIX
+VECTOR_INDEX_TYPES: Final[tuple[str, ...]] = ("int8_hnsw", "int4_hnsw", "hnsw")
+DEFAULT_VECTOR_INDEX_TYPE: Final[str] = os.getenv("RAG_VECTOR_INDEX_TYPE", "int8_hnsw").strip().lower()
+
+# Keeps "ACME-X200" and "ERR-1042" whole. Splits on whitespace and sentence punctuation only,
+# so hyphens, slashes, dots and underscores inside a code survive. "." still splits a sentence
+# end through the filter below.
+CODE_PRESERVING_ANALYSIS: Final[Dict[str, Any]] = {
+    "tokenizer": {
+        "code_tokenizer": {
+            "type": "char_group",
+            "tokenize_on_chars": ["whitespace", ",", ";", ":", "!", "?", "(", ")", "[", "]", "{", "}", '"', "'", "`", "|", "=", "<", ">"],
+        }
+    },
+    "filter": {
+        "trim_code_edges": {"type": "pattern_replace", "pattern": "^[-./_]+|[-./_]+$", "replacement": ""},
+        "drop_empty_tokens": {"type": "length", "min": 1},
+    },
+    "analyzer": {
+        "code_preserving": {
+            "type": "custom",
+            "tokenizer": "code_tokenizer",
+            "filter": ["cjk_width", "lowercase", "trim_code_edges", "drop_empty_tokens"],
+        }
+    },
+}
 
 
 class ElasticsearchIndexManager:
@@ -27,7 +53,11 @@ class ElasticsearchIndexManager:
         index_name: str | None = None,
         tenant_strategy: IndexTenantStrategy | None = None,
         dimensions: int = EMBEDDING_DIMS,
+        vector_index_type: str = DEFAULT_VECTOR_INDEX_TYPE,
     ) -> None:
+        if vector_index_type not in VECTOR_INDEX_TYPES:
+            raise ValueError(f"Unknown vector index type {vector_index_type!r}. Valid: {VECTOR_INDEX_TYPES}")
+        self.vector_index_type = vector_index_type
         self._es_url = es_url
         self.tenant_strategy = tenant_strategy or IndexTenantStrategy()
         self.index_name = index_name or self.tenant_strategy.resolve_index_name()
@@ -58,7 +88,10 @@ class ElasticsearchIndexManager:
                     "index.search.slowlog.threshold.query.warn": "0ms",
                     "index.search.slowlog.threshold.fetch.warn": "0ms",
                     "analysis": {
+                        "tokenizer": CODE_PRESERVING_ANALYSIS["tokenizer"],
+                        "filter": CODE_PRESERVING_ANALYSIS["filter"],
                         "analyzer": {
+                            "code_preserving": CODE_PRESERVING_ANALYSIS["analyzer"]["code_preserving"],
                             # Built-in filters only, no plugins: full-width folding, Arabic
                             # diacritic and letter-form normalization, Arabic-Indic digits
                             # to ASCII, and Han bigrams instead of isolated characters.
@@ -84,7 +117,14 @@ class ElasticsearchIndexManager:
                         "title": {"type": "text", "analyzer": "multilingual"},
                         "page_number": {"type": "integer"},
                         "chunk_index": {"type": "integer"},
-                        "content": {"type": "text", "analyzer": "multilingual"},
+                        "content": {
+                            "type": "text",
+                            "analyzer": "multilingual",
+                            "fields": {"codes": {"type": "text", "analyzer": "code_preserving"}},
+                        },
+                        # Readable context for parent-child retrieval: stored, never searched.
+                        "parent_id": {"type": "keyword"},
+                        "parent_content": {"type": "text", "index": False},
                         "is_public": {"type": "boolean"},
                         "acl_tags": {"type": "keyword"},
                         "uploaded_at": {"type": "keyword"},
@@ -111,7 +151,7 @@ class ElasticsearchIndexManager:
                             "index": True,
                             "similarity": "cosine",
                             "index_options": {
-                                "type": "int8_hnsw",
+                                "type": self.vector_index_type,
                                 "m": 16,
                                 "ef_construction": 100,
                             },

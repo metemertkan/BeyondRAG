@@ -8,6 +8,7 @@ Most RAG tutorials stop at chunking a single PDF for a single user. A company-wi
 | :--- | :--- | :--- |
 | [**#01**](#episode-1--access-management--cross-language-retrieval) | Access management and cross-language retrieval | Role pre-filtering inside Elasticsearch 8.15, and Chinese queries against English documents |
 | [**#02**](#episode-2--production-document-ingestion) | Production document ingestion | Complex formats, multilingual processing, semantic chunking, versioning and ground-truth decay, GDPR deletion, continuous evaluation |
+| [**#03**](#episode-3--retrieval-at-scale) | Retrieval at scale | Vector quantization, hybrid search with RRF, query transformation, parent-child chunks, cross-encoder re-ranking, multi-hop retrieval, context reordering |
 
 ---
 
@@ -144,6 +145,110 @@ An unavailable judge or missing model exits 2, because a gate that passes withou
 
 ---
 
+## Episode 3 — Retrieval at Scale
+
+Episode 2 got the right text into the index. Episode 3 is about getting it back out, and measures each technique rather than assuming it helps. Some of them helped a lot. Some made no measurable difference here, and the results below say so.
+
+Measurements come from [`scripts/ep3_benchmark.py`](./scripts/ep3_benchmark.py), using `bge-m3` embeddings on one local CPU machine. "SciFact" is the public BEIR SciFact dataset (5,183 documents, 300 test queries with human relevance judgments), downloaded by the script. Fixtures are invented and live in [`scripts/ep3_fixtures.py`](./scripts/ep3_fixtures.py).
+
+### Try it in the Retrieval Lab
+
+```bash
+# For meaningful dense search, set these in .env first
+RAG_EMBEDDING_PROVIDER=ollama
+RAG_EMBEDDING_DIMS=1024
+
+docker compose up -d --build
+```
+
+Open `http://localhost:8090`, click **Load lab documents** (about 4 minutes on CPU with `bge-m3`), then try the `[Lab]` prompts while changing the **Search**, **Query**, **Re-rank** and **Multi-hop** controls. Under each answer, **How this was retrieved** shows the query variants, the BM25 and dense rankings, how the re-ranker moved each result, and each hop of a multi-hop search. The cross-encoder downloads on first use. Revenue reports are tagged `finance`, so switch roles to watch a multi-hop question stop at the ACL.
+
+### 1. Quantization
+
+Set with `RAG_VECTOR_INDEX_TYPE` when the index is created. 1,024-dimension vectors on SciFact, force-merged, sizes read from the Lucene vector files:
+
+| Index | Memory for search, per 1M vectors | Saving vs. float | Disk vs. float | Recall@10 vs. exact | nDCG@10 |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| `hnsw` (float32) | 4.14 GB | | | 0.991 | 0.636 |
+| `int8_hnsw` (default) | 1.07 GB | **74%** | **+25%** | 0.945 | 0.639 |
+| `int4_hnsw` | 0.56 GB | 87% | +12% | 0.899 | 0.643 |
+
+- `int8` saves memory, not disk. Elasticsearch keeps the original floats on disk alongside the quantized copy, so total disk use grows.
+- The per-million figures are extrapolated from 5,183 vectors by bytes per vector. Latency at this size says little about latency at millions, so it isn't shown here. `ep3_benchmark` records it.
+- Recall against exact search fell by 4.5 points with `int8`, but nDCG didn't fall on this dataset. The differences between the three nDCG values are within noise.
+
+### 2. The exact match problem
+
+Lexical and dense search now run separately and merge with Reciprocal Rank Fusion, in Python, so they need no paid Elasticsearch feature. A `content.codes` subfield keeps `ACME-X200` as one token, where the standard analyzer indexes `acme` and `x200`.
+
+First-result hit rate on 128 queries against 240 long, near-identical pages with sequential codes and shared code parts:
+
+| Search | Hit@1 |
+| :--- | :---: |
+| Dense only | 78% |
+| BM25, standard analyzer | 59% |
+| BM25, code-preserving analyzer | 90% |
+| Hybrid RRF, code-preserving | **97%** |
+
+On an easier fixture of short, distinct pages, all four scored 100%, so this problem depends on your corpus. On SciFact, which is not about codes, nDCG@10 was 0.645 for dense, 0.654 for BM25, 0.656 for added scores and **0.679** for RRF.
+
+### 3. Query transformation
+
+`RAG_QUERY_MODE` adds LLM rewrites, HyDE or both. The original query always stays in the search, and HyDE text only drives dense search, so invented wording can't earn keyword matches.
+
+**This made no clear difference in our test.** 24 hand-written everyday questions against technical runbooks, with `qwen3:8b`:
+
+| Mode | Hit@1 | Hit@5 | Added latency |
+| :--- | :---: | :---: | :---: |
+| As typed | 33% | 46% | |
+| Rewrites | 38% | 50% | about 19 s |
+| HyDE | 33% | 54% | about 28 s |
+| Rewrites + HyDE | 38% | 46% | about 35 s |
+
+These differences amount to one or two questions out of 24. Rewrites often restated the question or guessed a cause that wasn't the one documented. The original prompt scored similarly, and one rewrite of it was the only tuning tried. A stronger model may do better, but we haven't measured that.
+
+### 4. Parent-child chunks
+
+`RAG_PARENT_CHILD=true` embeds and searches small child chunks, and gives the LLM their parent. The parent is stored on each child, so existing ACL, versioning and erasure cover it without a separate store. How often the top chunk contains the answer, on 12 questions per fixture:
+
+| Chunks | Single-topic sections | Multi-topic pages |
+| :--- | :---: | :---: |
+| Small only | 17% | 100% |
+| Large only | 100% | 58% |
+| Parent-child | **100%** | **100%** |
+
+The child size in this test was 50 tokens, to suit the short fixture. The default is 200. Parent-child uses about as much context as large chunks, and stores each parent's text once per child.
+
+### 5. Two-stage re-ranking
+
+`RAG_RERANK=true` passes the first-stage candidates through a local cross-encoder (`BAAI/bge-reranker-base`). On SciFact:
+
+| Pipeline | nDCG@10 | Recall@10 | P50 latency (CPU) |
+| :--- | :---: | :---: | :---: |
+| RRF only | 0.679 | 0.796 | 0.1 s |
+| Re-rank top 10 | **0.725** | 0.832 | 2.6 s |
+| Re-rank top 20 (default) | 0.724 | 0.847 | 5.6 s |
+| Re-rank top 50 | 0.716 | 0.837 | 14.4 s |
+
+Going wider didn't help on this dataset, and it cost much more time, so the default is 20 rather than the often-suggested 50 to 100. Latency depends on document length: these are full abstracts. A cross-encoder doesn't fix vocabulary mismatch, though. On the runbook test above, re-ranking lowered Hit@5 from 46% to 33%.
+
+### 6. Multi-hop retrieval
+
+With `multi_hop`, the LLM splits the question into dependent searches and feeds each answer into the next. Every hop uses the caller's ACL tags, and the chain stops rather than guesses when a hop finds nothing. On 8 questions such as "What was the revenue in Europe from the product we launched in Q3?", where the revenue report never mentions the quarter:
+
+| Retrieval | Both documents in context |
+| :--- | :---: |
+| Single search | 0 of 8 |
+| Multi-hop | **8 of 8** |
+
+Each question adds at least two LLM calls. This fixture was built to need two hops, and this measures retrieval, not the final written answer. GraphRAG isn't implemented.
+
+### 7. Lost in the middle
+
+The LLM prompt places the best chunks at the edges of the context and the weakest in the middle. **We could not reproduce the problem this addresses.** With one fact moved through all 15 positions of a context, `qwen3:8b` found it 100% of the time at every position. That held with short, unrelated chunks (6 facts), and with about 150-word chunks that state similar facts about other subjects (4 facts). These are small samples of simple lookups on one model. Reordering costs nothing, so it stays on, but we have no evidence that it helps here.
+
+---
+
 ## Repository Structure
 
 ```text
@@ -176,7 +281,13 @@ BeyondRAG/
 │   │   ├── ocr.py            # 14. OCR port & PaddleOCR adapter for scanned pages
 │   │   ├── tabular_store.py  # 15. SQLite store + structured table queries for large sheets
 │   │   ├── governance.py     # 16. Trust tiers, expiry, source precedence, conflict detection
-│   │   └── erasure.py        # 17. Lineage-based hard deletion, tombstones, source-system sync
+│   │   ├── erasure.py        # 17. Lineage-based hard deletion, tombstones, source-system sync
+│   │   ├── fusion.py         # 18. Reciprocal Rank Fusion and context reordering
+│   │   ├── query_transform.py # 19. LLM query rewrites and HyDE
+│   │   ├── parent_child.py   # 20. Small-to-big chunking and parent expansion
+│   │   ├── reranker.py       # 21. Cross-encoder adapter
+│   │   ├── pipeline.py       # 22. Retrieval pipeline and its trace
+│   │   └── multi_hop.py      # 23. Question decomposition and dependent searches
 │   ├── eval/                 # Golden-dataset harness and LLM-as-a-judge metrics
 │   └── web/
 │       ├── app.py            # REST API (/api/upload, /api/documents, /api/chat, /api/erasure, /api/sync/events)
@@ -214,6 +325,14 @@ BeyondRAG/
 | `RAG_OCR_LANGS` | _(empty)_ | PaddleOCR language codes for scanned pages, e.g. `ar,ch,en`. Requires `pip install .[ocr]`. |
 | `RAG_GOVERNANCE_TOKEN` | _(empty)_ | Enables `/api/erasure` and `/api/sync/events`. Both return 503 while this is unset. |
 | `RAG_ERASURE_KEY` | _(generated)_ | Key for hashed identifiers in the audit log. Generated under `workspace/` when empty. |
+| `RAG_VECTOR_INDEX_TYPE` | `int8_hnsw` | `int8_hnsw`, `int4_hnsw` or `hnsw`. Applies when the index is created. |
+| `RAG_PARENT_CHILD` | `false` (Compose: `true`) | Search small child chunks and pass their parent to the LLM. |
+| `RAG_PARENT_TOKENS` / `RAG_CHILD_TOKENS` | `1000` / `200` | Parent and child chunk sizes. |
+| `RAG_QUERY_MODE` | `off` | `off`, `multi`, `hyde` or `both`. Adds LLM calls before retrieval. |
+| `RAG_RERANK` | `false` | Re-rank candidates with a cross-encoder. Requires `pip install .[rerank]`, included in the Docker image. |
+| `RAG_RERANK_CANDIDATES` | `20` | First-stage candidates to re-rank. |
+| `RAG_RERANKER_MODEL` | `BAAI/bge-reranker-base` | Any cross-encoder supported by fastembed. |
+| `RAG_MULTI_HOP` | `false` | Decompose questions into dependent searches. Adds LLM calls to every query. |
 
 ---
 
@@ -234,3 +353,4 @@ Some existing tests rewrite the tracked `workspace/dynamic_concepts.json`. Resto
 
 - [x] **Episode #01:** Access Management (RBAC Pre-Filtering) & Dynamic LLM Cross-Language (`ZH ↔ EN`) Retrieval in Elasticsearch 8.15
 - [x] **Episode #02:** Production document ingestion: complex formats, multilingual processing, semantic chunking, versioning and ground-truth decay, GDPR deletion, continuous evaluation
+- [x] **Episode #03:** Retrieval at scale: quantization, hybrid search with RRF, query transformation, parent-child chunks, re-ranking, multi-hop retrieval, context reordering

@@ -31,6 +31,16 @@ services:
       - RAG_OCR_LANGS=${RAG_OCR_LANGS:-}
       - RAG_GOVERNANCE_TOKEN=${RAG_GOVERNANCE_TOKEN:-}
       - RAG_ERASURE_KEY=${RAG_ERASURE_KEY:-}
+      - RAG_VECTOR_INDEX_TYPE=${RAG_VECTOR_INDEX_TYPE:-int8_hnsw}
+      - RAG_PARENT_CHILD=${RAG_PARENT_CHILD:-true}
+      - RAG_PARENT_TOKENS=${RAG_PARENT_TOKENS:-1000}
+      - RAG_CHILD_TOKENS=${RAG_CHILD_TOKENS:-200}
+      - RAG_QUERY_MODE=${RAG_QUERY_MODE:-off}
+      - RAG_RERANK=${RAG_RERANK:-false}
+      - RAG_RERANK_CANDIDATES=${RAG_RERANK_CANDIDATES:-20}
+      - RAG_RERANKER_MODEL=${RAG_RERANKER_MODEL:-BAAI/bge-reranker-base}
+      - RAG_MULTI_HOP=${RAG_MULTI_HOP:-false}
+      - FASTEMBED_CACHE_PATH=/app/workspace/.fastembed
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

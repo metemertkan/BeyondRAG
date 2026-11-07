@@ -123,6 +123,7 @@
     @media (min-width: 1024px) {
       .layout { grid-template-columns: 5fr 7fr; }
     }
+    .layout > * { min-width: 0; }
 
     .panel {
       background: var(--br-surface);
@@ -354,6 +355,20 @@
       color: var(--br-ink);
     }
     .chip-row { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 4px; }
+    .lab-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .lab-field { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: var(--br-ink-2); }
+    .lab-field input[type="checkbox"] { accent-color: var(--br-fix); width: 16px; height: 16px; }
+    .trace { border-top: var(--br-hairline) solid var(--br-hair); padding-top: 8px; font-size: 0.8125rem; }
+    .trace summary { cursor: pointer; font-weight: 600; color: var(--br-ink-2); }
+    .trace-stage { padding-top: 12px; display: grid; gap: 4px; }
+    .trace-title { font-family: var(--br-font-mono); font-size: 0.6875rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--br-ink-2); }
+    .trace-row { display: grid; grid-template-columns: 3.5em minmax(0, 1fr) auto; gap: 8px; align-items: baseline; }
+    .trace-row .rank { font-family: var(--br-font-mono); white-space: nowrap; }
+    .trace-row .name { overflow-wrap: anywhere; }
+    .trace-row .why { color: var(--br-ink-2); font-family: var(--br-font-mono); white-space: nowrap; }
+    .trace-note { color: var(--br-ink-2); overflow-wrap: anywhere; }
+    .rank.up { color: var(--br-fix); }
+    .rank.down { color: var(--br-fail); }
     .meta-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
     .chat-form {
@@ -444,6 +459,28 @@
         <div class="row" id="demoPromptsRow">
           <span class="prompt-label">Demo Prompts</span>
           <!-- Populated at runtime from /api/ui-demo-config (config/ui_demo.json). -->
+        </div>
+        <div class="lab-row" id="retrievalLab" aria-label="Retrieval options">
+          <span class="prompt-label">Retrieval Lab</span>
+          <label class="lab-field">Search
+            <select id="labFusion" class="select-input">
+              <option value="rrf">Hybrid (RRF)</option>
+              <option value="dense">Dense only</option>
+              <option value="lexical">BM25 only</option>
+              <option value="linear">Added scores</option>
+            </select>
+          </label>
+          <label class="lab-field">Query
+            <select id="labQueryMode" class="select-input">
+              <option value="off">As typed</option>
+              <option value="multi">LLM rewrites</option>
+              <option value="hyde">HyDE</option>
+              <option value="both">Rewrites + HyDE</option>
+            </select>
+          </label>
+          <label class="lab-field"><input type="checkbox" id="labRerank" /> Re-rank</label>
+          <label class="lab-field"><input type="checkbox" id="labMultiHop" /> Multi-hop</label>
+          <button type="button" class="btn" id="labSeedBtn" onclick="seedRetrievalLab()">Load lab documents</button>
         </div>
       </div>
 
@@ -726,7 +763,16 @@
         const resp = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question, user_roles: roles, top_k: 4, synthesis_mode: synthesisMode })
+          body: JSON.stringify({
+            question,
+            user_roles: roles,
+            top_k: 4,
+            synthesis_mode: synthesisMode,
+            fusion: document.getElementById('labFusion').value,
+            query_mode: document.getElementById('labQueryMode').value,
+            rerank: document.getElementById('labRerank').checked,
+            multi_hop: document.getElementById('labMultiHop').checked,
+          })
         });
         const data = await resp.json();
         appendAssistantResponse(data);
@@ -765,8 +811,90 @@
             ${formatSimpleMarkdown(data.answer || '')}
           </div>
           ${chunkMeta ? `<div class="chip-row">${chunkMeta}</div>` : ''}
+          ${renderTrace(data.retrieval_trace, data.masked_restricted_docs)}
         </div>
       `);
+    }
+
+    function traceRows(items) {
+      return items.map(item => `
+        <div class="trace-row">
+          <span class="rank ${item.rankClass || ''}">${escapeHtml(item.rank)}</span>
+          <span class="name">${escapeHtml(item.name)}</span>
+          <span class="why">${escapeHtml(item.why || '')}</span>
+        </div>`).join('');
+    }
+
+    function traceStage(title, body) {
+      return `<div class="trace-stage"><div class="trace-title">${escapeHtml(title)}</div>${body}</div>`;
+    }
+
+    function renderTrace(trace, masked) {
+      if (!trace) return '';
+      const stages = [];
+      const variants = trace.variants || [];
+      if (variants.length > 1) {
+        stages.push(traceStage('Query transformation', variants.map(v =>
+          `<div class="trace-note"><span class="label">${escapeHtml(v.kind)}</span> ${escapeHtml(v.text)}</div>`).join('')));
+      }
+      for (const error of trace.transform_errors || []) {
+        stages.push(traceStage('Query transformation failed', `<div class="trace-note">${escapeHtml(error)}</div>`));
+      }
+      for (const hop of trace.hops || []) {
+        stages.push(traceStage(`Hop ${hop.step}`, `
+          <div class="trace-note"><strong>Searched:</strong> ${escapeHtml(hop.search)}</div>
+          ${hop.answer ? `<div class="trace-note"><strong>Found:</strong> ${escapeHtml(hop.answer)}</div>` : ''}
+          <div class="trace-note"><strong>Sources:</strong> ${escapeHtml((hop.sources || []).join(', ') || 'none visible to this role')}</div>`));
+      }
+      if (trace.stopped_reason) {
+        stages.push(traceStage('Stopped', `<div class="trace-note">${escapeHtml(trace.stopped_reason)}</div>`));
+      }
+      const first = trace.first_stage || {};
+      const rankings = first.rankings || {};
+      if ((rankings.lexical || []).length || (rankings.dense || []).length) {
+        const docName = id => String(id).replace(/^doc-/, '').replace(/-[0-9a-f]{12}_p\d+_c\d+$/, '');
+        const list = ids => (ids || []).slice(0, 3).map((id, i) => `${i + 1}. ${escapeHtml(docName(id))}`).join('<br/>') || 'no matches';
+        stages.push(traceStage('First-stage rankings', `
+          <div class="trace-note"><strong>BM25:</strong><br/>${list(rankings.lexical)}</div>
+          <div class="trace-note"><strong>Dense:</strong><br/>${list(rankings.dense)}</div>`));
+      }
+      const rerank = trace.rerank;
+      if (rerank && rerank.status === 'applied') {
+        stages.push(traceStage(`Re-ranked ${rerank.pairs} candidates in ${Math.round(rerank.latency_ms)} ms`, traceRows(rerank.moved.slice(0, 5).map(m => ({
+          rank: `${m.from} → ${m.to}`,
+          rankClass: m.to < m.from ? 'up' : m.to > m.from ? 'down' : '',
+          name: m.filename,
+          why: Number(m.score).toFixed(3),
+        })))));
+      } else if (rerank) {
+        stages.push(traceStage(`Re-ranking ${rerank.status}`, `<div class="trace-note">${escapeHtml(rerank.reason || '')}</div>`));
+      }
+      const parents = trace.parents || {};
+      if (parents.expanded) {
+        stages.push(traceStage('Small-to-big', `<div class="trace-note">Searched small chunks, then passed ${escapeHtml(parents.expanded)} full parent section(s) to the model, merging ${escapeHtml(parents.children_merged)} duplicate hit(s).</div>`));
+      }
+      if ((masked || []).length) {
+        stages.push(traceStage('Blocked by your role', masked.slice(0, 4).map(doc =>
+          `<div class="trace-note">${escapeHtml(doc.filename)}: needs ${escapeHtml((doc.required_any_of_tags || []).join(' or '))}</div>`).join('')));
+      }
+      if (!stages.length) return '';
+      return `<details class="trace"><summary>How this was retrieved</summary>${stages.join('')}</details>`;
+    }
+
+    async function seedRetrievalLab() {
+      const button = document.getElementById('labSeedBtn');
+      button.disabled = true;
+      button.textContent = 'Loading...';
+      try {
+        const resp = await fetch('/api/seed-lab', { method: 'POST' });
+        const data = await resp.json();
+        button.textContent = resp.ok ? `Loaded ${data.seeded} documents` : 'Loading failed';
+        await fetchDocumentsAndTags();
+      } catch (_) {
+        button.textContent = 'Loading failed';
+      } finally {
+        button.disabled = false;
+      }
     }
 
     function formatSimpleMarkdown(text) {

@@ -6,9 +6,10 @@ import hmac
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +17,8 @@ from pydantic import BaseModel, Field
 
 from src.rag.erasure import ErasedSourceError
 from src.rag.governance import DocumentGovernance
+from src.rag.pipeline import PipelineOptions
+from src.rag.seeding import seed_lab_documents
 from src.rag.service import KB_INDEX_NAME, get_kb_service, normalize_tags
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -63,6 +66,15 @@ class ChatRequest(BaseModel):
         default="default",
         description="Retrieval profile ('default', 'precision', 'high_recall', 'executive_summary').",
     )
+    fusion: Optional[Literal["rrf", "linear", "dense", "lexical"]] = Field(
+        default=None, description="How to combine lexical and dense search. Defaults to 'rrf'."
+    )
+    query_mode: Optional[Literal["off", "multi", "hyde", "both"]] = Field(
+        default=None, description="LLM query transformation: rewrites, HyDE, or both."
+    )
+    rerank: Optional[bool] = Field(default=None, description="Re-rank first-stage candidates with a cross-encoder.")
+    candidates: Optional[int] = Field(default=None, ge=5, le=200, description="First-stage breadth before re-ranking.")
+    multi_hop: Optional[bool] = Field(default=None, description="Decompose the question into dependent searches.")
 
 
 class UpdateTagsRequest(BaseModel):
@@ -300,6 +312,14 @@ async def source_sync_event(
     return result
 
 
+@app.post("/api/seed-lab")
+async def seed_retrieval_lab() -> Dict[str, Any]:
+    """Load the invented Episode 3 corpus used by the Retrieval Lab demo prompts."""
+    kb = get_kb_service()
+    seeded = await run_in_threadpool(seed_lab_documents, kb)
+    return {"seeded": len(seeded), "filenames": [item["filename"] for item in seeded]}
+
+
 @app.post("/api/seed")
 async def seed_demo_documents() -> Dict[str, Any]:
     """Ensure the 4 demo PDFs (Public, Finance, Operation, Joint Finance+Operation) are indexed."""
@@ -317,10 +337,21 @@ async def seed_demo_documents() -> Dict[str, Any]:
 async def chat_with_kb(payload: ChatRequest) -> Dict[str, Any]:
     """Run an RBAC pre-filtered hybrid RAG query and return the grounded answer + security X-Ray."""
     kb = get_kb_service()
-    return kb.query_and_chat(
+    defaults = PipelineOptions.from_env()
+    options = PipelineOptions(
+        fusion=payload.fusion,
+        query_mode=payload.query_mode or defaults.query_mode,
+        rerank=defaults.rerank if payload.rerank is None else payload.rerank,
+        candidates=payload.candidates or defaults.candidates,
+        multi_hop=defaults.multi_hop if payload.multi_hop is None else payload.multi_hop,
+    )
+    # The LLM and model calls block, so keep them off the event loop.
+    return await run_in_threadpool(
+        kb.query_and_chat,
         question=payload.question,
         user_roles=payload.user_roles,
         top_k=payload.top_k,
         synthesis_mode=payload.synthesis_mode,
         retrieval_profile=payload.retrieval_profile,
+        pipeline_options=options,
     )

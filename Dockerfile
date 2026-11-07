@@ -14,7 +14,9 @@ COPY config ./config
 COPY web_server.py benchmark_rbac.py ./
 RUN mkdir -p /app/workspace/uploads
 
-RUN pip install --upgrade pip && pip install .
+# The Retrieval Lab re-ranker. Set INSTALL_EXTRAS="" for a smaller image.
+ARG INSTALL_EXTRAS=rerank
+RUN pip install --upgrade pip && pip install ".[${INSTALL_EXTRAS}]"
 
 EXPOSE 8090
 
