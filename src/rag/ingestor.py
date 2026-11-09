@@ -32,6 +32,7 @@ from src.rag.embeddings import (
 from src.rag.extractor import ParserDegradedError
 from src.rag.governance import DocumentGovernance, normalize_subject_id
 from src.rag.models import IngestionReport, IngestionState, ParsedBlock, ParsedDocument
+from src.rag.parent_child import ParentChildSplitter
 from src.rag.ports import (
     ChunkerPort,
     CrossLingualPort,
@@ -125,7 +126,9 @@ class PdfIngestor:
         repository: DocumentRepositoryPort,
         expected_manifest: EmbeddingManifest | None = None,
         embedding_manifest: EmbeddingManifest | None = None,
+        parent_child: ParentChildSplitter | None = None,
     ) -> None:
+        self._parent_child = parent_child
         self._extractor = extractor
         self._chunker = chunker
         self._cross_lingual = cross_lingual
@@ -189,8 +192,24 @@ class PdfIngestor:
     ) -> List[Dict[str, Any]]:
         chunk_records: List[Dict[str, Any]] = []
         global_chunk_idx = 0
-        units: List[tuple[int, str, str, Dict[str, Any]]] = []
+        # (page, text, block type, metadata, parent id, parent text)
+        units: List[tuple[int, str, str, Dict[str, Any], Optional[str], Optional[str]]] = []
         effective_date = governance.effective_date or uploaded_at[:10]
+        parent_serial = 0
+
+        def add_text_units(page: int, text: str, block_type: str, metadata: Dict[str, Any]) -> None:
+            nonlocal parent_serial
+            if self._parent_child is None:
+                pieces = self._chunker.split(text)
+                routed = routed_metadata(metadata)
+                units.extend((page, piece, block_type, routed, None, None) for piece in pieces)
+                return
+            children = self._parent_child.split(text)
+            base = parent_serial
+            for child in children:
+                parent_serial = max(parent_serial, base + child.parent_index + 1)
+                parent_id = f"{assigned_doc_id}_parent{base + child.parent_index + 1}"
+                units.append((page, child.text, block_type, dict(metadata), parent_id, child.parent_text))
 
         def routed_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
             decision = getattr(self._chunker, "last_decision", None)
@@ -200,20 +219,14 @@ class PdfIngestor:
             for block in blocks:
                 if block.block_type in {"table", "table_summary"}:
                     # Keep tables intact as retrieval units (structure-preserving).
-                    units.append((block.page_number, block.text, block.block_type, dict(block.metadata)))
+                    units.append((block.page_number, block.text, block.block_type, dict(block.metadata), None, None))
                 else:
-                    pieces = self._chunker.split(block.text)
-                    metadata = routed_metadata(block.metadata)
-                    for piece in pieces:
-                        units.append((block.page_number, piece, block.block_type, metadata))
+                    add_text_units(block.page_number, block.text, block.block_type, block.metadata)
         else:
             for page_num, extracted_text in pages:
-                pieces = self._chunker.split(extracted_text)
-                metadata = routed_metadata({})
-                for piece in pieces:
-                    units.append((page_num, piece, "paragraph", metadata))
+                add_text_units(page_num, extracted_text, "paragraph", {})
 
-        for page_num, chunk_str, block_type, block_meta in units:
+        for page_num, chunk_str, block_type, block_meta, parent_id, parent_text in units:
             global_chunk_idx += 1
             chunk_id = f"{assigned_doc_id}_p{page_num}_c{global_chunk_idx}"
             enriched_text = f"{safe_filename} (Page {page_num}): {chunk_str}"
@@ -246,11 +259,15 @@ class PdfIngestor:
                     "expires_at": governance.expires_at,
                     "business_domain": governance.business_domain,
                     "source_system": governance.source_system,
-                    "subject_ids": sorted(set(governance.subject_ids) | set(detect_subject_ids(chunk_str))),
+                    # The parent is stored on this chunk, so its people count for lineage too.
+                    "subject_ids": sorted(
+                        set(governance.subject_ids) | set(detect_subject_ids(f"{chunk_str}\n{parent_text or ''}"))
+                    ),
                     "metadata": {
                         "block_type": block_type,
                         **block_meta,
                     },
+                    **({"parent_id": parent_id, "parent_content": parent_text} if parent_id else {}),
                 }
             )
         return chunk_records
@@ -264,6 +281,7 @@ class PdfIngestor:
         tenant: str | None = None,
         source_key: str | None = None,
         governance: DocumentGovernance | None = None,
+        extract_concepts: bool = True,
     ) -> Dict[str, Any]:
         """Ingest a document with PENDING→PROCESSING lifecycle, versioning, and rollback."""
         if not pdf_bytes:
@@ -371,9 +389,11 @@ class PdfIngestor:
             full_doc_text = "\n\n".join(
                 b.text for b in parsed.blocks if b.text
             ) or "\n\n".join(text for _, text in parsed.pages)
-            extracted_concepts, concept_model = self._cross_lingual.extract_concepts_at_ingestion(
-                filename=safe_filename,
-                full_text=full_doc_text,
+            # An LLM call per document: callers with no cross-lingual need can skip it.
+            extracted_concepts, concept_model = (
+                self._cross_lingual.extract_concepts_at_ingestion(filename=safe_filename, full_text=full_doc_text)
+                if extract_concepts
+                else ([], "skipped")
             )
             concept_ids = [c["concept_id"] for c in extracted_concepts]
 

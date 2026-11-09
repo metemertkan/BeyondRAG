@@ -15,12 +15,14 @@ ReportLab, or FastAPI):
   10. Answer Synthesis             -> `AnswerSynthesizerPort` (`synthesizer.py`)
   11. Demo Document Seeding        -> `DemoSeederPort` (`seeding.py`)
   12. Erasure & Source Sync        -> `ErasureService`, `SourceSyncHandler` (`erasure.py`)
+  13. Retrieval Pipeline           -> `RetrievalPipeline` (`pipeline.py`), `MultiHopPlanner` (`multi_hop.py`)
 """
 
 from __future__ import annotations
 
 import inspect
-from typing import Any, Dict, Final, List
+from dataclasses import asdict
+from typing import Any, Dict, Final, List, Optional
 
 from src.rag.acl import (
     PUBLIC_SENTINEL_TAG,
@@ -30,6 +32,9 @@ from src.rag.acl import (
     resolve_document_acl,
 )
 from src.rag.governance import DocumentGovernance, detect_conflicts
+from src.rag.multi_hop import MultiHopPlanner
+from src.rag.pipeline import PipelineOptions, PipelineResult, RetrievalPipeline
+from src.rag.profiles import DEFAULT_INDEX_PREFIX
 from src.rag.ports import (
     AnswerSynthesizerPort,
     CrossLingualPort,
@@ -39,9 +44,10 @@ from src.rag.ports import (
     HybridRetrieverPort,
     IndexManagerPort,
     PdfIngestorPort,
+    RerankerPort,
 )
 
-KB_INDEX_NAME: Final[str] = "hk-rbac-rag-kb"
+KB_INDEX_NAME: Final[str] = DEFAULT_INDEX_PREFIX
 
 
 def _wire_default_components(
@@ -66,6 +72,7 @@ def _wire_default_components(
     from src.rag.ingestor import PdfIngestor
     from src.rag.repository import DEFAULT_REGISTRY_PATH, DEFAULT_TABULAR_PATH, DocumentRepository
     from src.rag.tabular_store import TabularStore
+    from src.rag.parent_child import ParentChildSplitter, parent_child_enabled
     from src.rag.retriever import HybridRetriever
     from src.rag.seeding import DemoDocumentSeeder
     from src.rag.synthesizer import GroundedAnswerSynthesizer
@@ -93,6 +100,7 @@ def _wire_default_components(
         cross_lingual=cross_lingual,
         embedder=embedder,
         repository=repository,
+        parent_child=ParentChildSplitter() if parent_child_enabled() else None,
     )
     retriever = HybridRetriever(es_manager=es_manager)
     synthesizer = GroundedAnswerSynthesizer()
@@ -131,7 +139,12 @@ class RBACKnowledgeBaseService:
         retriever: HybridRetrieverPort | None = None,
         synthesizer: AnswerSynthesizerPort | None = None,
         seeder: DemoSeederPort | None = None,
+        reranker: RerankerPort | None = None,
+        multi_hop_planner: MultiHopPlanner | None = None,
     ) -> None:
+        self._reranker_override = reranker
+        self._multi_hop = multi_hop_planner or MultiHopPlanner()
+        self._pipeline: RetrievalPipeline | None = None
         if any(
             c is None
             for c in (
@@ -197,6 +210,7 @@ class RBACKnowledgeBaseService:
         tenant: str | None = None,
         source_key: str | None = None,
         governance: DocumentGovernance | None = None,
+        **ingest_options: Any,
     ) -> Dict[str, Any]:
         return self._ingestor.ingest(
             filename=filename,
@@ -206,6 +220,7 @@ class RBACKnowledgeBaseService:
             tenant=tenant,
             source_key=source_key,
             governance=governance,
+            **ingest_options,
         )
 
     def list_documents(self, *, include_superseded: bool = True) -> List[Dict[str, Any]]:
@@ -272,27 +287,53 @@ class RBACKnowledgeBaseService:
         top_k: int = 4,
         synthesis_mode: str = "fast",
         retrieval_profile: str | None = None,
+        pipeline_options: Optional[PipelineOptions] = None,
     ) -> Dict[str, Any]:
         cleaned_roles, effective_acl_tags = build_effective_acl_tags(user_roles)
         is_cjk_query = self._cross_lingual.is_cross_lingual(question)
+        options = pipeline_options or PipelineOptions.from_env()
 
         expanded_query, matched_concepts = self._cross_lingual.prepare_query(
             question=question,
             allow_llm_fallback=(synthesis_mode == "llm"),
         )
-        query_vector = self._embedder.embed(expanded_query)
 
-        search_outcome = self._retriever.search(
-            expanded_query=expanded_query,
-            query_vector=query_vector,
-            effective_acl_tags=effective_acl_tags,
-            top_k=top_k,
-            profile_name=retrieval_profile,
-        )
+        pipeline = self._get_pipeline()
+
+        def retrieve(search_question: str, search_text: str) -> PipelineResult:
+            # Every search, on every hop, is pinned to this user's ACL tags.
+            return pipeline.run(
+                question=search_question,
+                search_text=search_text,
+                acl_tags=effective_acl_tags,
+                top_k=top_k,
+                profile_name=retrieval_profile,
+                options=options,
+            )
+
+        if options.multi_hop:
+            hop_result = self._multi_hop.run(
+                question, lambda step: retrieve(step, step), max_hops=options.max_hops
+            )
+            latest = hop_result.latest or retrieve(question, expanded_query)
+            authorized_chunks = hop_result.chunks or list(latest.chunks)
+            masked_docs = hop_result.masked_restricted_docs
+            trace = {
+                **latest.trace,
+                "hops": [asdict(hop) for hop in hop_result.hops],
+                "stopped_reason": hop_result.stopped_reason,
+            }
+            search_text = f"{expanded_query} {' '.join(hop.search for hop in hop_result.hops)}"
+        else:
+            latest = retrieve(question, expanded_query)
+            authorized_chunks = latest.chunks
+            masked_docs = latest.masked_restricted_docs
+            trace = latest.trace
+            search_text = latest.search_text or expanded_query
 
         allowed_tables = {
             chunk["metadata"]["table_id"]
-            for chunk in search_outcome.authorized_chunks
+            for chunk in authorized_chunks
             if isinstance(chunk.get("metadata"), dict) and chunk["metadata"].get("table_id")
         }
 
@@ -304,17 +345,21 @@ class RBACKnowledgeBaseService:
             return self._repository.tabular_store.query(table_query, effective_acl_tags)  # type: ignore[attr-defined]
 
         extra_args: Dict[str, Any] = {}
-        if allowed_tables and "table_query_runner" in inspect.signature(self._synthesizer.synthesize).parameters:
+        synthesize_params = inspect.signature(self._synthesizer.synthesize).parameters
+        if allowed_tables and "table_query_runner" in synthesize_params:
             extra_args["table_query_runner"] = run_table_query
+        reranked = trace.get("rerank", {}).get("status") == "applied"
+        if (reranked or options.multi_hop) and "ranked_by_model" in synthesize_params:
+            extra_args["ranked_by_model"] = True
 
         answer = self._synthesizer.synthesize(
             question=question,
-            expanded_query=expanded_query,
+            expanded_query=search_text,
             matched_concepts=matched_concepts,
             is_cjk_query=is_cjk_query,
             user_roles=cleaned_roles,
-            authorized_chunks=search_outcome.authorized_chunks,
-            masked_restricted_docs=search_outcome.masked_restricted_docs,
+            authorized_chunks=authorized_chunks,
+            masked_restricted_docs=masked_docs,
             synthesis_mode=synthesis_mode,
             **extra_args,
         )
@@ -326,13 +371,23 @@ class RBACKnowledgeBaseService:
             "expanded_query": expanded_query,
             "user_roles": cleaned_roles,
             "effective_acl_filter": effective_acl_tags,
-            "latency_ms": search_outcome.latency_ms,
-            "authorized_chunks": search_outcome.authorized_chunks,
-            "masked_restricted_docs": search_outcome.masked_restricted_docs,
-            "es_query_dsl": search_outcome.query_dsl,
-            "conflicts": detect_conflicts(search_outcome.authorized_chunks),
+            "latency_ms": latest.latency_ms,
+            "authorized_chunks": authorized_chunks,
+            "masked_restricted_docs": masked_docs,
+            "es_query_dsl": latest.query_dsl,
+            "conflicts": detect_conflicts(authorized_chunks),
+            "retrieval_trace": trace,
             "answer": answer,
         }
+
+    def _get_pipeline(self) -> RetrievalPipeline:
+        if self._pipeline is None:
+            # Loads lazily: a missing optional install shows up in the trace only if re-ranking is asked for.
+            from src.rag.reranker import FastEmbedCrossEncoder
+
+            reranker = self._reranker_override or FastEmbedCrossEncoder()
+            self._pipeline = RetrievalPipeline(self._retriever, self._embedder, reranker=reranker)
+        return self._pipeline
 
 
 _KB_SERVICE_INSTANCE: RBACKnowledgeBaseService | None = None

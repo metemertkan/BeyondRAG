@@ -7,7 +7,7 @@ Ollama, Gemini, pdfplumber, PyPDF, ReportLab). Contains zero external library de
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple
 
@@ -22,6 +22,19 @@ class HybridSearchOutcome:
     masked_restricted_docs: List[Dict[str, Any]]
     latency_ms: float
     query_dsl: Dict[str, Any]
+    # Chunk ids per ranking ("lexical", "dense") before fusion, for tracing.
+    rankings: Dict[str, List[str]] = field(default_factory=dict)
+
+
+class RerankerPort(Protocol):
+    """Cross-encoder scoring: how well each text answers this query, read together."""
+
+    @property
+    def model_name(self) -> str:
+        ...
+
+    def score(self, query: str, texts: Sequence[str]) -> List[float]:
+        ...
 
 
 class IndexManagerPort(Protocol):
@@ -182,10 +195,12 @@ class HybridRetrieverPort(Protocol):
     def search(
         self,
         expanded_query: str,
-        query_vector: List[float],
+        query_vector: Optional[List[float]],
         effective_acl_tags: List[str],
         top_k: int = 4,
         profile_name: str | None = None,
+        fusion: str | None = None,
+        candidate_k: int | None = None,
     ) -> HybridSearchOutcome:
         ...
 

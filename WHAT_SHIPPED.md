@@ -4,6 +4,22 @@
 
 This file records the first Episode 2 increment (versioning, PDF layout, embedding contract), then the second (Excel, multilingual, semantic chunking, trust tiers, GDPR, CI evaluation) under "Ingestion challenges increment". Where the two disagree, the second is current.
 
+## Retrieval at scale increment (Episode 3)
+
+| Claim | Where | Test |
+| --- | --- | --- |
+| Configurable vector index type, `int8_hnsw` by default | `es_client.py` | `test_vector_index_type_*`, `test_unknown_vector_index_type_*` |
+| Codes stay whole in a `content.codes` subfield | `es_client.py`, `retriever.py` | `test_live_standard_analyzer_*`, `test_live_sentence_end_*`, `test_live_exact_code_*` |
+| Reciprocal Rank Fusion over separate BM25 and dense searches, with the ACL on both | `fusion.py`, `retriever.py` | `test_rrf_*`, `test_live_rrf_*`, `test_live_acl_*`, `test_acl_filters_*` |
+| Query rewrites and HyDE, original always kept, HyDE dense only, failures reported | `query_transform.py`, `pipeline.py` | `test_rewrites_*`, `test_hyde_*`, `test_llm_failure_*`, `test_every_variant_*` |
+| Parent-child: only children embedded, parent stored on the child, covered by ACL, versioning and erasure | `parent_child.py`, `ingestor.py` | `test_children_*`, `test_expansion_*`, `test_retrieval_returns_the_parent_*`, `test_parent_inherits_*`, `test_erasure_removes_parents_*`, `test_a_new_version_*` |
+| Two-stage re-ranking; failure keeps first-stage order and is reported; ACL applies before it | `reranker.py`, `pipeline.py` | `test_reranker_*`, `test_rerank_scores_*`, `test_missing_reranker_*`, `test_acl_is_enforced_before_*` |
+| Multi-hop: dependent searches, capped hops, stops when a hop finds nothing, ACL on every hop | `multi_hop.py`, `service.py` | `test_second_hop_*`, `test_chain_stops_*`, `test_hops_are_capped`, `test_restricted_second_hop_*` |
+| Context reordering for the LLM prompt | `fusion.py`, `synthesizer.py` | `test_reorder_*`, `test_llm_prompt_uses_*` |
+| Retrieval Lab controls and a retrieval trace in the UI | `index.html`, `app.py`, `seeding.py` | Exercised by hand, not by an automated test |
+
+Not implemented: GraphRAG. Measurements are in the README, and they include techniques that showed no clear benefit in our tests.
+
 ## Ingestion challenges increment
 
 | Claim | Where | Test |
