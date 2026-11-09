@@ -275,9 +275,9 @@ In the Retrieval Lab, tick **Verify answer** and choose what happens to unsuppor
 | Error | Value check | LLM check | Both |
 | :--- | :---: | :---: | :---: |
 | Changed number | 100% | 75% | **100%** |
-| Changed entity | 12% | 50% | 62% |
+| Changed entity | 13% | 50% | 63% |
 | Negation | 0% | 100% | **100%** |
-| Invented addition | 12% | 12% | **12%** |
+| Invented addition | 13% | 13% | **13%** |
 | Wrong source cited | 88% | 100% | **100%** |
 | False alarms on faithful sentences | 0% | 0% | **0%** |
 
