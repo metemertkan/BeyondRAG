@@ -35,6 +35,7 @@ from src.rag.governance import DocumentGovernance, detect_conflicts
 from src.rag.multi_hop import MultiHopPlanner
 from src.rag.pipeline import PipelineOptions, PipelineResult, RetrievalPipeline
 from src.rag.profiles import DEFAULT_INDEX_PREFIX
+from src.rag.trust import ABSTAIN_MESSAGE, AnswerVerifier, LlmClaimVerifier, TrustReport, apply_trust_policy
 from src.rag.ports import (
     AnswerSynthesizerPort,
     CrossLingualPort,
@@ -141,8 +142,10 @@ class RBACKnowledgeBaseService:
         seeder: DemoSeederPort | None = None,
         reranker: RerankerPort | None = None,
         multi_hop_planner: MultiHopPlanner | None = None,
+        answer_verifier: AnswerVerifier | None = None,
     ) -> None:
         self._reranker_override = reranker
+        self._answer_verifier = answer_verifier or AnswerVerifier(LlmClaimVerifier())
         self._multi_hop = multi_hop_planner or MultiHopPlanner()
         self._pipeline: RetrievalPipeline | None = None
         if any(
@@ -352,17 +355,29 @@ class RBACKnowledgeBaseService:
         if (reranked or options.multi_hop) and "ranked_by_model" in synthesize_params:
             extra_args["ranked_by_model"] = True
 
-        answer = self._synthesizer.synthesize(
-            question=question,
-            expanded_query=search_text,
-            matched_concepts=matched_concepts,
-            is_cjk_query=is_cjk_query,
-            user_roles=cleaned_roles,
-            authorized_chunks=authorized_chunks,
-            masked_restricted_docs=masked_docs,
-            synthesis_mode=synthesis_mode,
-            **extra_args,
-        )
+        trust_report: Optional[Dict[str, Any]] = None
+        best = max((float(c.get("score") or 0.0) for c in authorized_chunks), default=0.0)
+        if options.min_relevance is not None and reranked and authorized_chunks and best < options.min_relevance:
+            # Refuse before generating: nothing retrieved looks like an answer, so no LLM call.
+            answer = ABSTAIN_MESSAGE
+            trust_report = TrustReport(
+                "abstained", [], ["relevance"], abstained=True,
+                abstain_reason=f"The best match scored {best:.3f}, below the {options.min_relevance:.3f} threshold.",
+            ).to_dict()
+        else:
+            answer = self._synthesizer.synthesize(
+                question=question,
+                expanded_query=search_text,
+                matched_concepts=matched_concepts,
+                is_cjk_query=is_cjk_query,
+                user_roles=cleaned_roles,
+                authorized_chunks=authorized_chunks,
+                masked_restricted_docs=masked_docs,
+                synthesis_mode=synthesis_mode,
+                **extra_args,
+            )
+            if options.verify:
+                trust_report, answer = self._verify_answer(answer, options)
 
         return {
             "question": question,
@@ -377,8 +392,21 @@ class RBACKnowledgeBaseService:
             "es_query_dsl": latest.query_dsl,
             "conflicts": detect_conflicts(authorized_chunks),
             "retrieval_trace": trace,
+            "trust_report": trust_report,
             "answer": answer,
         }
+
+    def _verify_answer(self, answer: str, options: PipelineOptions) -> tuple[Dict[str, Any], str]:
+        synthesizer = self._synthesizer
+        if getattr(synthesizer, "last_mode_used", "fast") != "llm":
+            # The fast answer quotes a retrieved chunk word for word, so there is nothing to verify.
+            return {"verdict": "extractive", "sentences": [], "checks": [], "abstained": False}, answer
+        sources = getattr(synthesizer, "last_sources", {})
+        report = self._answer_verifier.report(
+            getattr(synthesizer, "last_raw_answer", answer), sources, use_llm=options.verify_with_llm
+        )
+        answer = apply_trust_policy(report, answer, sources, options.trust_mode)
+        return report.to_dict(), answer
 
     def _get_pipeline(self) -> RetrievalPipeline:
         if self._pipeline is None:

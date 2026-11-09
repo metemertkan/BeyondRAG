@@ -367,6 +367,8 @@
     .trace-row .name { overflow-wrap: anywhere; }
     .trace-row .why { color: var(--br-ink-2); font-family: var(--br-font-mono); white-space: nowrap; }
     .trace-note { color: var(--br-ink-2); overflow-wrap: anywhere; }
+    .trust-row { display: grid; grid-template-columns: 9.5em minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 4px 0; }
+    .trust-row .label { justify-self: start; }
     .rank.up { color: var(--br-fix); }
     .rank.down { color: var(--br-fail); }
     .meta-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -480,6 +482,14 @@
           </label>
           <label class="lab-field"><input type="checkbox" id="labRerank" /> Re-rank</label>
           <label class="lab-field"><input type="checkbox" id="labMultiHop" /> Multi-hop</label>
+          <label class="lab-field"><input type="checkbox" id="labVerify" /> Verify answer</label>
+          <label class="lab-field">Unsupported
+            <select id="labTrustMode" class="select-input">
+              <option value="annotate">Flag</option>
+              <option value="strip">Remove</option>
+              <option value="abstain">Refuse answer</option>
+            </select>
+          </label>
           <button type="button" class="btn" id="labSeedBtn" onclick="seedRetrievalLab()">Load lab documents</button>
         </div>
       </div>
@@ -772,6 +782,8 @@
             query_mode: document.getElementById('labQueryMode').value,
             rerank: document.getElementById('labRerank').checked,
             multi_hop: document.getElementById('labMultiHop').checked,
+            verify: document.getElementById('labVerify').checked,
+            trust_mode: document.getElementById('labTrustMode').value,
           })
         });
         const data = await resp.json();
@@ -811,9 +823,41 @@
             ${formatSimpleMarkdown(data.answer || '')}
           </div>
           ${chunkMeta ? `<div class="chip-row">${chunkMeta}</div>` : ''}
+          ${renderTrust(data.trust_report)}
           ${renderTrace(data.retrieval_trace, data.masked_restricted_docs)}
         </div>
       `);
+    }
+
+    const TRUST_LABELS = {
+      supported: ['Supported', 'label-fix'],
+      contradicted: ['Contradicted', 'label-fail'],
+      unsupported: ['Not in sources', 'label-fail'],
+      invalid_citation: ['Bad citation', 'label-fail'],
+      miscited: ['Wrong source cited', 'label-ink'],
+      uncited: ['No citation', 'label-ink'],
+      unchecked: ['Not checked', ''],
+    };
+    const VERDICTS = {
+      grounded: 'Every statement is supported by its cited source.',
+      has_unsupported_claims: 'Some statements are not supported by the sources.',
+      citation_problems: 'The facts check out, but some citations are missing or wrong.',
+      partly_checked: 'Some statements could not be checked.',
+      extractive: 'This answer quotes a retrieved document directly.',
+      abstained: 'No answer was given.',
+    };
+
+    function renderTrust(report) {
+      if (!report) return '';
+      const verdict = VERDICTS[report.verdict] || report.verdict;
+      const failed = (report.checks || []).includes('llm_failed') ? '<div class="trace-note">The LLM check failed, so only values and citations were checked.</div>' : '';
+      const rows = (report.sentences || []).map(s => {
+        const [label, cls] = TRUST_LABELS[s.status] || [s.status, ''];
+        const why = (s.reasons || []).join(' ');
+        return `<div class="trust-row"><span class="label ${cls}">${escapeHtml(label)}</span><span>${escapeHtml(s.text)}${why ? `<br/><span class="trace-note">${escapeHtml(why)}</span>` : ''}</span></div>`;
+      }).join('');
+      const extra = report.abstained && report.abstain_reason ? `<div class="trace-note">${escapeHtml(report.abstain_reason)}</div>` : (report.removed ? `<div class="trace-note">${escapeHtml(report.removed)} statement(s) removed from the answer.</div>` : '');
+      return `<details class="trace" open><summary>Trust report: ${escapeHtml(verdict)}</summary>${failed}${extra}<div class="trace-stage">${rows}</div></details>`;
     }
 
     function traceRows(items) {

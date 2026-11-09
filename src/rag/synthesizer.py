@@ -18,6 +18,7 @@ from src.rag.fusion import reorder_for_attention
 from src.rag.governance import DEFAULT_TRUST_TIER, SOURCE_PRECEDENCE_RULES, detect_conflicts
 from src.rag.multilingual import normalize_for_matching, split_sentences
 from src.rag.tabular_store import TableQuery
+from src.rag.trust import ABSTAIN_MESSAGE, CITATION_RULES, is_not_found, render_citations, without_not_found
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +65,20 @@ def _best_snippet(text: str, tokens: set[str]) -> str:
 class GroundedAnswerSynthesizer:
     """Synthesizes RBAC-aware and cross-lingual grounded answers from authorized chunks."""
 
-    def __init__(self, llm_factory: Callable[..., Any] = get_llm, *, reorder_context: bool = True) -> None:
+    def __init__(
+        self, llm_factory: Callable[..., Any] = get_llm, *, reorder_context: bool = True, cite_sources: bool = True
+    ) -> None:
         self._llm_factory = llm_factory
+        # Off reproduces the earlier prompt, which cited file names and had no way to say "not found".
+        self._cite_sources = cite_sources
         self._reorder_context = reorder_context
         # Set per call: "llm" or "fast". Lets the eval gate detect a silent fallback.
         self.last_mode_used = "fast"
         # The exact sources the model was given, tool results and headers included.
         self.last_context_parts: List[str] = []
+        # Source id ("S1") -> the text the model saw, and the answer before citations were rendered.
+        self.last_sources: Dict[str, Dict[str, Any]] = {}
+        self.last_raw_answer = ""
 
     def _run_table_query(
         self,
@@ -109,6 +117,8 @@ class GroundedAnswerSynthesizer:
         that shares no words with the question is still relevant and must not be filtered out."""
         self.last_mode_used = "fast"
         self.last_context_parts = []
+        self.last_sources = {}
+        self.last_raw_answer = ""
         role_display = (
             ", ".join(f"`{r}`" for r in user_roles)
             if user_roles
@@ -153,28 +163,45 @@ class GroundedAnswerSynthesizer:
                 # Models attend most to the start and end of a long context, so the
                 # strongest chunks go at the edges and the weakest in the middle.
                 ordered = reorder_for_attention(relevant_chunks) if self._reorder_context else relevant_chunks
-                context_parts = [
-                    f"Source: {c['filename']} (Page {c['page_number']}, Tags: {c['tags'] or ['PUBLIC']}, "
-                    f"Trust tier: {c.get('trust_tier') or DEFAULT_TRUST_TIER}, "
-                    f"Effective: {c.get('effective_date') or 'unknown'})\n"
-                    f"Content: {c['content']}"
-                    for c in ordered
-                ]
+                sources: List[Dict[str, Any]] = []
                 table_chunks = [c for c in relevant_chunks if c.get("block_type") == "table_summary"]
                 if table_chunks and table_query_runner is not None:
                     try:
                         table_source = self._run_table_query(question, table_chunks, table_query_runner)
                         if table_source:
-                            context_parts.insert(0, table_source)
+                            sources.append({"filename": table_chunks[0]["filename"], "page_number": table_chunks[0]["page_number"], "text": table_source})
                     except Exception as exc:
                         # The summary chunk is still in context, so the answer can proceed.
                         logger.warning("Structured table query failed: %s", exc)
+                for c in ordered:
+                    sources.append(
+                        {
+                            "filename": c["filename"],
+                            "page_number": c["page_number"],
+                            "chunk_id": c.get("chunk_id"),
+                            "text": (
+                                f"Source: {c['filename']} (Page {c['page_number']}, Tags: {c['tags'] or ['PUBLIC']}, "
+                                f"Trust tier: {c.get('trust_tier') or DEFAULT_TRUST_TIER}, "
+                                f"Effective: {c.get('effective_date') or 'unknown'})\n"
+                                f"Content: {c['content']}"
+                            ),
+                        }
+                    )
+                # Short ids let the model cite per sentence, and let the answer be checked against them.
+                self.last_sources = {f"S{i}": s for i, s in enumerate(sources, start=1)}
+                context_parts = (
+                    [f"[{sid}] {s['text']}" for sid, s in self.last_sources.items()]
+                    if self._cite_sources
+                    else [s["text"] for s in sources]
+                )
                 self.last_context_parts = list(context_parts)
                 context_str = "\n\n".join(context_parts)
                 # Language choice is query-driven — no hardcoded language-pair instruction map.
                 lang_instruction = (
-                    "Respond in the same language as the user's question in 2 concise "
-                    "bullet points citing [filename.pdf, p. 1]."
+                    "Respond in the same language as the user's question in 2 concise bullet points. "
+                    f"{CITATION_RULES}"
+                    if self._cite_sources
+                    else "Respond in the same language as the user's question in 2 concise bullet points citing [filename.pdf, p. 1]."
                 )
                 prompt = ChatPromptTemplate.from_messages(
                     [
@@ -203,7 +230,12 @@ class GroundedAnswerSynthesizer:
                 content = str(getattr(resp, "content", resp)).strip()
                 if content:
                     self.last_mode_used = "llm"
-                    return content
+                    self.last_raw_answer = content
+                    if not self._cite_sources:
+                        return content
+                    if is_not_found(content):
+                        return ABSTAIN_MESSAGE
+                    return render_citations(without_not_found(content), self.last_sources)
             except Exception as exc:
                 logger.warning("LLM synthesis failed; using the fast citation answer: %s", exc)
 

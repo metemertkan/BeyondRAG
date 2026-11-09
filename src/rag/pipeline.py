@@ -34,6 +34,12 @@ class PipelineOptions:
     candidates: int = 20
     multi_hop: bool = False
     max_hops: int = 3
+    # Trust: check the answer against its sources, and what to do with unsupported statements.
+    verify: bool = False
+    verify_with_llm: bool = True
+    trust_mode: str = "annotate"
+    # With re-ranking on: answer nothing when the best candidate scores below this.
+    min_relevance: Optional[float] = None
 
     @classmethod
     def from_env(cls) -> "PipelineOptions":
@@ -42,6 +48,10 @@ class PipelineOptions:
             rerank=os.getenv("RAG_RERANK", "false").strip().lower() == "true",
             candidates=int(os.getenv("RAG_RERANK_CANDIDATES", "20")),
             multi_hop=os.getenv("RAG_MULTI_HOP", "false").strip().lower() == "true",
+            verify=os.getenv("RAG_VERIFY", "false").strip().lower() == "true",
+            verify_with_llm=os.getenv("RAG_VERIFY_WITH_LLM", "true").strip().lower() == "true",
+            trust_mode=os.getenv("RAG_TRUST_MODE", "annotate").strip().lower(),
+            min_relevance=float(os.environ["RAG_MIN_RELEVANCE"]) if os.getenv("RAG_MIN_RELEVANCE") else None,
         )
 
 

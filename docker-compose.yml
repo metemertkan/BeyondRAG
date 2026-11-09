@@ -40,6 +40,10 @@ services:
       - RAG_RERANK_CANDIDATES=${RAG_RERANK_CANDIDATES:-20}
       - RAG_RERANKER_MODEL=${RAG_RERANKER_MODEL:-BAAI/bge-reranker-base}
       - RAG_MULTI_HOP=${RAG_MULTI_HOP:-false}
+      - RAG_VERIFY=${RAG_VERIFY:-false}
+      - RAG_VERIFY_WITH_LLM=${RAG_VERIFY_WITH_LLM:-true}
+      - RAG_TRUST_MODE=${RAG_TRUST_MODE:-annotate}
+      - RAG_MIN_RELEVANCE=${RAG_MIN_RELEVANCE:-}
       - FASTEMBED_CACHE_PATH=/app/workspace/.fastembed
     extra_hosts:
       - "host.docker.internal:host-gateway"

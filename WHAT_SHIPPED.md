@@ -4,6 +4,19 @@
 
 This file records the first Episode 2 increment (versioning, PDF layout, embedding contract), then the second (Excel, multilingual, semantic chunking, trust tiers, GDPR, CI evaluation) under "Ingestion challenges increment". Where the two disagree, the second is current.
 
+## Trustworthy answers increment (Episode 4)
+
+| Claim | Where | Test |
+| --- | --- | --- |
+| Numbered sources and per-sentence citations, rendered as file names | `synthesizer.py`, `trust.py` | `test_citations_*`, `test_llm_answer_cites_*` |
+| Value check: numbers and codes must appear in a cited source | `trust.py` | `test_value_check_*`, `test_values_cover_*`, `test_spelled_out_*` |
+| LLM claim check, failures reported, verdicts matched even when numbered from 0 | `trust.py` | `test_llm_verdicts_*`, `test_llm_failure_*`, `test_verdicts_*` |
+| `NOT_FOUND` abstention, including wrapped forms | `trust.py`, `synthesizer.py` | `test_not_found_*`, `test_wrapped_not_found_*`, `test_llm_saying_not_found_*` |
+| Policies: annotate, strip, abstain | `trust.py` | `test_annotate_*`, `test_strip_*`, `test_abstain_*` |
+| Relevance gate refuses before any LLM call | `service.py` | `test_relevance_gate_*` |
+| Verification only sees authorized sources | `service.py` | `test_verification_never_sees_restricted_*` |
+| Trust report panel and controls in the Lab | `index.html`, `app.py` | Exercised by hand |
+
 ## Retrieval at scale increment (Episode 3)
 
 | Claim | Where | Test |
