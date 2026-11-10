@@ -9,6 +9,7 @@ Most RAG tutorials stop at chunking a single PDF for a single user. A company-wi
 | [**#01**](#episode-1--access-management--cross-language-retrieval) | Access management and cross-language retrieval | Role pre-filtering inside Elasticsearch 8.15, and Chinese queries against English documents |
 | [**#02**](#episode-2--production-document-ingestion) | Production document ingestion | Complex formats, multilingual processing, semantic chunking, versioning and ground-truth decay, GDPR deletion, continuous evaluation |
 | [**#03**](#episode-3--retrieval-at-scale) | Retrieval at scale | Vector quantization, hybrid search with RRF, query transformation, parent-child chunks, cross-encoder re-ranking, multi-hop retrieval, context reordering |
+| [**#04**](#episode-4--trustworthy-answers) | Trustworthy answers | Per-sentence citations, hallucination checks, a measured LLM checker, abstention, a trust report per answer |
 
 ---
 
@@ -249,6 +250,67 @@ The LLM prompt places the best chunks at the edges of the context and the weakes
 
 ---
 
+## Episode 4 — Trustworthy Answers
+
+Retrieval can be right and the answer still wrong. Episode 4 makes LLM answers checkable: every sentence cites a numbered source, each sentence is checked against what it cites, and a policy decides whether to show it, remove it, or answer nothing. As in Episode 3, everything is measured, including what didn't work.
+
+Measurements come from [`scripts/ep4_benchmark.py`](./scripts/ep4_benchmark.py), with `qwen3:8b` as both the answering model and the checker, on one CPU machine. Test sets are in [`scripts/ep4_fixtures.py`](./scripts/ep4_fixtures.py). SciFact human labels are downloaded by the script.
+
+Earlier episodes already cover related ground: the Episode 2 [continuous evaluation](#continuous-evaluation) gate (Context Precision and Faithfulness on a golden set), and the [versioning](#episode-2--production-document-ingestion) rules that make the model name conflicting sources instead of blending them.
+
+### How it works
+
+- **Citations.** Sources reach the model as `[S1]`, `[S2]`, and every sentence must end with the ids it relies on. Readers see file names. An id that wasn't among the sources is flagged.
+- **A value check.** Every number, amount and code in a sentence must appear in a source it cites. No model call, so it's instant and can't be argued with.
+- **An LLM check.** One call per answer labels each sentence supported, contradicted or not stated by its cited sources. A failed check is reported, never treated as a pass.
+- **Abstention.** The model can answer `NOT_FOUND`. With re-ranking on, `RAG_MIN_RELEVANCE` refuses before any LLM call when nothing retrieved looks like an answer.
+- **A policy.** `annotate` shows everything with its trust report, `strip` removes unsupported sentences, `abstain` refuses the whole answer if any sentence fails.
+
+In the Retrieval Lab, tick **Verify answer** and choose what happens to unsupported statements. Each answer then shows a trust report with a label per sentence.
+
+### Results
+
+**Catching planted errors.** 8 facts, each rewritten into 5 kinds of error plus a faithful version (48 sentences):
+
+| Error | Value check | LLM check | Both |
+| :--- | :---: | :---: | :---: |
+| Changed number | 100% | 75% | **100%** |
+| Changed entity | 13% | 50% | 63% |
+| Negation | 0% | 100% | **100%** |
+| Invented addition | 13% | 13% | **13%** |
+| Wrong source cited | 88% | 100% | **100%** |
+| False alarms on faithful sentences | 0% | 0% | **0%** |
+
+The two checks catch different things, so they work best together. Neither caught invented additions such as "mostly from the German market": the LLM checker approved 7 of 8.
+
+**How far to trust the checker.** On 120 SciFact claims labeled by people (40 supported, 40 contradicted, 40 not enough information), the `qwen3:8b` checker agreed on **82%**, Cohen's kappa **0.73**. It labeled 5 of 80 unsupported claims as supported (6%), and 6 of 40 supported claims as unsupported. About 29 s per claim on CPU.
+
+**End to end.** 24 questions over the lab corpus: 12 answerable, 12 that sit close to something the corpus covers but aren't answerable from it.
+
+| | Answerable correct | Unanswerable refused outright |
+| :--- | :---: | :---: |
+| Earlier prompt | 12/12 | 0/12 |
+| Cited prompt | 12/12 | 4/12 |
+| Cited prompt + `strip` | 12/12 | 4/12 |
+| Cited prompt + `abstain` | 10/12 | 6/12 |
+| **Re-ranker gate at 0.8** | **12/12** | **11/12** |
+
+- Every correct answer cited a source containing the value (12/12).
+- Invented numbers were rare: 1 answer in 24, a total the model summed itself, which `strip` and `abstain` removed.
+- The most common failure was **substitution**: asked about department heads, contractor laptops or customer emails, the model answered with the line manager limit, standard laptops or chat history. Each sentence was true and correctly cited, so the checks passed it. **Grounding checks verify statements, not whether they answer the question.**
+- `abstain` refused 2 correct answers, because the model added a sentence the sources didn't state ("No other source provides...").
+- The re-ranker's best score separated the two groups well (AUC 0.958). The 0.8 threshold was picked on these same 24 questions, so treat it as a starting point to tune on your own data, not a validated setting.
+
+Checking one answer took about 46 s on CPU, on top of about 27 s to write it.
+
+### Limits worth knowing
+
+- **The checker is the same small model that writes the answers.** A stronger checker would likely do better, but that's not measured here.
+- **The test sets are small and invented,** apart from SciFact.
+- **Abstention depends on the question.** A question about something the corpus doesn't cover at all is easy to refuse. A question close to something it does cover is where answers go wrong.
+
+---
+
 ## Repository Structure
 
 ```text
@@ -287,7 +349,8 @@ BeyondRAG/
 │   │   ├── parent_child.py   # 20. Small-to-big chunking and parent expansion
 │   │   ├── reranker.py       # 21. Cross-encoder adapter
 │   │   ├── pipeline.py       # 22. Retrieval pipeline and its trace
-│   │   └── multi_hop.py      # 23. Question decomposition and dependent searches
+│   │   ├── multi_hop.py      # 23. Question decomposition and dependent searches
+│   │   └── trust.py          # 24. Citations, value and LLM checks, abstention policy
 │   ├── eval/                 # Golden-dataset harness and LLM-as-a-judge metrics
 │   └── web/
 │       ├── app.py            # REST API (/api/upload, /api/documents, /api/chat, /api/erasure, /api/sync/events)
@@ -333,6 +396,10 @@ BeyondRAG/
 | `RAG_RERANK_CANDIDATES` | `20` | First-stage candidates to re-rank. |
 | `RAG_RERANKER_MODEL` | `BAAI/bge-reranker-base` | Any cross-encoder supported by fastembed. |
 | `RAG_MULTI_HOP` | `false` | Decompose questions into dependent searches. Adds LLM calls to every query. |
+| `RAG_VERIFY` | `false` | Check each sentence of an LLM answer against its cited sources. |
+| `RAG_VERIFY_WITH_LLM` | `true` | Add the LLM check to the value and citation checks. One extra call per answer. |
+| `RAG_TRUST_MODE` | `annotate` | `annotate`, `strip` or `abstain`: what happens to unsupported statements. |
+| `RAG_MIN_RELEVANCE` | _(off)_ | With re-ranking on, refuse when the best candidate scores below this, without calling the LLM. |
 
 ---
 
@@ -354,3 +421,4 @@ Some existing tests rewrite the tracked `workspace/dynamic_concepts.json`. Resto
 - [x] **Episode #01:** Access Management (RBAC Pre-Filtering) & Dynamic LLM Cross-Language (`ZH ↔ EN`) Retrieval in Elasticsearch 8.15
 - [x] **Episode #02:** Production document ingestion: complex formats, multilingual processing, semantic chunking, versioning and ground-truth decay, GDPR deletion, continuous evaluation
 - [x] **Episode #03:** Retrieval at scale: quantization, hybrid search with RRF, query transformation, parent-child chunks, re-ranking, multi-hop retrieval, context reordering
+- [x] **Episode #04:** Trustworthy answers: citations, hallucination checks, abstention, trust reports

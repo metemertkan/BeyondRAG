@@ -33,6 +33,14 @@
     {
       "label": "[Lab] Re-rank",
       "query": "How much does the Aurora router cost?"
+    },
+    {
+      "label": "[Trust] Answerable",
+      "query": "What was Helios revenue in Europe?"
+    },
+    {
+      "label": "[Trust] Not in the documents",
+      "query": "What is the list price of the AR-9 model?"
     }
   ]
 }

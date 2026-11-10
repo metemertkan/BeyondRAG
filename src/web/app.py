@@ -75,6 +75,10 @@ class ChatRequest(BaseModel):
     rerank: Optional[bool] = Field(default=None, description="Re-rank first-stage candidates with a cross-encoder.")
     candidates: Optional[int] = Field(default=None, ge=5, le=200, description="First-stage breadth before re-ranking.")
     multi_hop: Optional[bool] = Field(default=None, description="Decompose the question into dependent searches.")
+    verify: Optional[bool] = Field(default=None, description="Check each sentence of an LLM answer against its sources.")
+    trust_mode: Optional[Literal["annotate", "strip", "abstain"]] = Field(
+        default=None, description="What to do with unsupported statements: show them flagged, remove them, or answer nothing."
+    )
 
 
 class UpdateTagsRequest(BaseModel):
@@ -344,6 +348,10 @@ async def chat_with_kb(payload: ChatRequest) -> Dict[str, Any]:
         rerank=defaults.rerank if payload.rerank is None else payload.rerank,
         candidates=payload.candidates or defaults.candidates,
         multi_hop=defaults.multi_hop if payload.multi_hop is None else payload.multi_hop,
+        verify=defaults.verify if payload.verify is None else payload.verify,
+        verify_with_llm=defaults.verify_with_llm,
+        trust_mode=payload.trust_mode or defaults.trust_mode,
+        min_relevance=defaults.min_relevance,
     )
     # The LLM and model calls block, so keep them off the event loop.
     return await run_in_threadpool(
