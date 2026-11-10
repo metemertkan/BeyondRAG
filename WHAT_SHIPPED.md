@@ -4,6 +4,26 @@
 
 This file records the first Episode 2 increment (versioning, PDF layout, embedding contract), then the second (Excel, multilingual, semantic chunking, trust tiers, GDPR, CI evaluation) under "Ingestion challenges increment". Where the two disagree, the second is current.
 
+## Multi-tenant isolation increment (Episode 5)
+
+| Claim | Where | Test |
+| --- | --- | --- |
+| Identity from a signed token; forged, expired, wildcard and two-tenant tokens refused | `auth.py`, `app.py` | `test_token_*`, `test_changing_the_tenant_inside_a_token_breaks_it`, `test_data_endpoints_refuse_a_request_without_a_valid_token` |
+| Roles and tenant typed into a request are ignored | `app.py` | `test_roles_and_tenant_typed_into_the_request_are_ignored`, `test_an_upload_lands_in_the_token_tenant_whatever_the_form_says` |
+| A read names exactly one tenant, with no default and no wildcard | `tenancy.py`, `retriever.py` | `test_a_read_needs_exactly_one_valid_tenant`, `test_search_without_a_tenant_does_not_run` |
+| Tenant filter in BM25, kNN and the masked-documents audit | `retriever.py` | `test_tenant_filter_is_in_both_halves_of_the_hybrid_query`, `test_live_pool_filters_*` |
+| Pool and silo layouts | `es_client.py`, `profiles.py` | `test_silo_mode_gives_each_tenant_a_concrete_index_and_keeps_the_filter` |
+| Document ids, source keys and tables scoped by tenant | `repository.py`, `tabular_store.py` | `test_same_file_name_in_two_tenants_*`, `test_same_bytes_in_two_tenants_*`, `test_same_table_id_in_two_tenants_*` |
+| A foreign document answers like a missing one | `repository.py`, `app.py` | `test_another_tenants_document_looks_exactly_like_a_missing_one` |
+| Erasure, tombstones and sync events stay inside one tenant | `erasure.py` | `test_erasing_a_source_in_one_tenant_*`, `test_a_tombstone_blocks_only_the_tenant_that_erased`, `test_two_tenants_can_send_the_same_event_id` |
+| Concepts and cached queries stay inside their tenant | `cross_lingual.py` | `test_concepts_and_cached_queries_stay_inside_their_tenant` |
+| Writes need a write role in the caller's own tenant | `app.py` | `test_changing_documents_needs_a_write_role`, `test_an_admin_of_one_tenant_is_nobody_in_another` |
+| Operator endpoints take one explicit tenant; offboarding removes one tenant only | `app.py`, `service.py`, `repository.py` | `test_operator_endpoints_need_*`, `test_offboarding_*` |
+| Health reports liveness only; no CORS grant by default; no demo token in required mode | `app.py` | `test_health_says_nothing_about_the_data`, `test_browsers_on_other_sites_*`, `test_demo_token_exists_only_in_demo_mode` |
+| 22 attacks against the code before and after, token forgery, restart | `scripts/ep5_attack_runner.py`, `scripts/ep5_benchmark.py` | Run by hand: `--sections attacks` |
+
+Not shipped: tokens from an identity provider with public keys, per-tenant encryption keys, rate limits or quotas, and a defence against the shared BM25 statistics of the pool layout.
+
 ## Trustworthy answers increment (Episode 4)
 
 | Claim | Where | Test |
