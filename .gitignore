@@ -15,6 +15,7 @@ workspace/language_packs.json
 workspace/tabular_store.sqlite
 workspace/erasure_log.jsonl
 workspace/.erasure_key
+workspace/.auth_secret
 workspace/.fastembed/
 !workspace/.gitkeep
 

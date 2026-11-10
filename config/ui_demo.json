@@ -3,6 +3,14 @@
   "chat_placeholder": "Click a query above or ask in any supported language...",
   "demo_prompts": [
     {
+      "label": "[Tenant] Cash reserve",
+      "query": "What is the minimum cash reserve the treasury team must maintain?"
+    },
+    {
+      "label": "[Tenant] Project Nightjar",
+      "query": "What is the acquisition budget for Project Nightjar?"
+    },
+    {
       "label": "[Public] 八號風球考勤",
       "query": "八號風球及混合辦公考勤政策是什麼？"
     },

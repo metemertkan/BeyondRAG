@@ -10,6 +10,8 @@ Guarantees:
   - Immediate cleanup/rollback on parser, embedding, or indexing failure
   - Lineage and governance on every chunk: source_key, subject_ids, trust tier, dates
   - Erasure tombstones refuse to re-admit data that a deletion request removed
+  - Tenant scope on every lookup and write: a logical document is ``(tenant, source_key)``,
+    and a document id that another tenant already owns is refused
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from src.rag.extractor import ParserDegradedError
 from src.rag.governance import DocumentGovernance, normalize_subject_id
 from src.rag.models import IngestionReport, IngestionState, ParsedBlock, ParsedDocument
 from src.rag.parent_child import ParentChildSplitter
+from src.rag.tenancy import DEFAULT_TENANT, normalize_tenant
 from src.rag.ports import (
     ChunkerPort,
     CrossLingualPort,
@@ -55,13 +58,6 @@ def detect_subject_ids(text: str) -> List[str]:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def normalize_tenant(tenant: str | None) -> str:
-    """Normalize tenant/scope segment used inside source_key."""
-    raw = (tenant or "default").strip().lower() or "default"
-    cleaned = "".join(c for c in raw if c.isalnum() or c in ("-", "_"))[:32]
-    return cleaned or "default"
 
 
 def generate_source_key(filename: str, tenant: str | None = None) -> str:
@@ -88,17 +84,21 @@ def generate_deterministic_doc_id(
     """Derive version-specific document ID from filename + content hash (+ tenant when non-default).
 
     Ep1 compatibility: with default tenant the ID remains ``doc-{stem}-{12hex}``.
-    Non-default tenants prefix the stem so identity includes scope without rewriting
-    historical Ep1 content claims about the blog post itself.
+
+    Other tenants get ``doc-{tenant}-{stem}-{12hex}``, and the hex comes from a hash that
+    includes the tenant. The prefix alone is not enough: a default-tenant file named
+    ``acme-handbook.pdf`` and tenant ``acme``'s ``handbook.pdf`` with the same bytes would
+    produce the same id. Chunk ids are built from the document id and are the Elasticsearch
+    ``_id``, so in a shared index one tenant's upload would overwrite the other's chunks.
     """
-    content_hash = content_sha256(file_bytes)[:12]
     clean_name = "".join(
         c for c in Path(filename).stem.lower() if c.isalnum() or c in ("-", "_")
     )[:20]
     tenant_norm = normalize_tenant(tenant)
-    if tenant_norm != "default":
-        return f"doc-{tenant_norm}-{clean_name}-{content_hash}"
-    return f"doc-{clean_name}-{content_hash}"
+    if tenant_norm != DEFAULT_TENANT:
+        salted = hashlib.sha256(tenant_norm.encode("utf-8") + b"\x00" + file_bytes).hexdigest()[:12]
+        return f"doc-{tenant_norm}-{clean_name}-{salted}"
+    return f"doc-{clean_name}-{content_sha256(file_bytes)[:12]}"
 
 
 def _resolve_embedder_manifest(embedder: EmbedderPort) -> EmbeddingManifest:
@@ -294,22 +294,31 @@ class PdfIngestor:
         assigned_doc_id = doc_id or generate_deterministic_doc_id(
             safe_filename, pdf_bytes, tenant=tenant_norm
         )
+        # A caller-chosen id must not point at another tenant's document: the rollback and
+        # re-index paths below delete by document id. Same message as any unusable id, so
+        # the refusal does not confirm that the other tenant's document exists.
+        if hasattr(self._repository, "tenant_of"):
+            owner = self._repository.tenant_of(assigned_doc_id)
+            if owner is not None and owner != tenant_norm:
+                raise ValueError(f"Document id is not available: {assigned_doc_id}")
         acl = resolve_document_acl(tags)
         uploaded_at = _utc_now()
         governance = governance or DocumentGovernance()
         effective_date = governance.effective_date or uploaded_at[:10]
 
         # Before any state is written: erased data must not get back in, even as PENDING.
+        # Tombstones are per tenant: one tenant's erasure never blocks another's upload.
         if hasattr(self._repository, "assert_not_erased"):
             self._repository.assert_not_erased(
                 source_key=resolved_source_key,
                 content_hash=digest,
                 subject_ids=governance.subject_ids,
+                tenant=tenant_norm,
             )
 
         previous_current_id: Optional[str] = None
         if hasattr(self._repository, "get_current_doc_id"):
-            previous_current_id = self._repository.get_current_doc_id(resolved_source_key)
+            previous_current_id = self._repository.get_current_doc_id(resolved_source_key, tenant=tenant_norm)
 
         # Same bytes already current → idempotent re-index path (no new version).
         same_bytes_retry = previous_current_id == assigned_doc_id
@@ -322,7 +331,7 @@ class PdfIngestor:
             doc_version = (
                 existing_state.doc_version
                 if existing_state is not None
-                else self._repository.next_doc_version(resolved_source_key)
+                else self._repository.next_doc_version(resolved_source_key, tenant=tenant_norm)
             )
         else:
             doc_version = 1
@@ -391,7 +400,9 @@ class PdfIngestor:
             ) or "\n\n".join(text for _, text in parsed.pages)
             # An LLM call per document: callers with no cross-lingual need can skip it.
             extracted_concepts, concept_model = (
-                self._cross_lingual.extract_concepts_at_ingestion(filename=safe_filename, full_text=full_doc_text)
+                self._cross_lingual.extract_concepts_at_ingestion(
+                    filename=safe_filename, full_text=full_doc_text, tenant=tenant_norm
+                )
                 if extract_concepts
                 else ([], "skipped")
             )
@@ -402,7 +413,7 @@ class PdfIngestor:
                 subject for subject in detect_subject_ids(full_doc_text) if subject not in governance.subject_ids
             ]
             if hasattr(self._repository, "assert_not_erased"):
-                self._repository.assert_not_erased(subject_ids=detected_subjects)
+                self._repository.assert_not_erased(subject_ids=detected_subjects, tenant=tenant_norm)
 
             # Stage-then-publish: when replacing another version, stage chunks as
             # non-current first so v1 stays the sole searchable current until publish.
@@ -429,9 +440,9 @@ class PdfIngestor:
             )
 
             if hasattr(self._repository, "delete_chunks"):
-                self._repository.delete_chunks(assigned_doc_id)
+                self._repository.delete_chunks(assigned_doc_id, tenant=tenant_norm)
             else:
-                self._repository.delete_document(assigned_doc_id)
+                self._repository.delete_document(assigned_doc_id, tenant=tenant_norm)
             self._repository.save_chunks(chunk_records)
             parsed_tables = list(getattr(parsed, "tables", []) or [])
             if parsed_tables and hasattr(self._repository, "save_tables"):
@@ -440,6 +451,7 @@ class PdfIngestor:
                     doc_id=assigned_doc_id,
                     source_key=resolved_source_key,
                     acl_tags=acl.acl_tags,
+                    tenant=tenant_norm,
                 )
 
             if hasattr(self._repository, "set_index_embedding_manifest"):
@@ -520,12 +532,13 @@ class PdfIngestor:
                         assigned_doc_id,
                         is_current=True,
                         status=IngestionState.INDEXED.value,
+                        tenant=tenant_norm,
                     )
                 raise
 
             # Stage-then-publish: v1 was never superseded before v2 INDEXED, so a
             # failed revision leaves the previous current searchable without restore.
-            self._repository.delete_document(assigned_doc_id)
+            self._repository.delete_document(assigned_doc_id, tenant=tenant_norm)
 
             failed_report = replace(
                 pending_report,

@@ -1,8 +1,13 @@
 """Component 6: Hybrid Retrieval (`BM25 + int8_hnsw`) & RBAC Mask Auditing.
 
 Runs lexical and dense searches against Elasticsearch 8.15 (or the in-memory fallback), both
-pre-filtered by ACL and document lifecycle, merges them with Reciprocal Rank Fusion, and audits
-restricted documents masked by the RBAC filter.
+pre-filtered by tenant, ACL and document lifecycle, merges them with Reciprocal Rank Fusion,
+and audits restricted documents masked by the RBAC filter.
+
+Tenant scope is fail-closed. ``search`` takes ``tenant`` as a required keyword, so a call
+site that forgets it raises ``TypeError`` instead of quietly reading the default tenant.
+The tenant picks the index and is also a filter in every query, including the masked-document
+audit. There is no argument that searches across tenants.
 """
 
 from __future__ import annotations
@@ -18,11 +23,12 @@ from src.rag.fusion import reciprocal_rank_fusion
 from src.rag.governance import apply_trust_ranking, is_expired
 from src.rag.ports import HybridSearchOutcome
 from src.rag.profiles import RetrievalProfile, get_retrieval_profile
+from src.rag.tenancy import DEFAULT_TENANT, require_tenant
 
 # Fetch extra candidates so trust ranking can promote a chunk from outside the top-k.
 _RERANK_OVERFETCH = 3
 _GOVERNANCE_FIELDS = ("trust_tier", "effective_date", "expires_at", "business_domain", "subject_ids")
-_CHUNK_FIELDS = ("block_type", "source_key", "doc_version", "ingestion_status", "parent_id", "parent_content")
+_CHUNK_FIELDS = ("block_type", "source_key", "doc_version", "ingestion_status", "parent_id", "parent_content", "tenant")
 # An exact code outranks an ordinary word match, but stays one lexical signal among others.
 _CODE_FIELD_BOOST: Final[float] = 3.0
 _MEMORY_TOKEN_RE = re.compile(r"[\w][\w./-]*[\w]|[\w]")
@@ -92,8 +98,9 @@ class HybridRetriever:
         profile: RetrievalProfile,
         filters: Sequence[Dict[str, Any]],
         fetch_size: int,
+        index: str,
     ) -> tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]:
-        client, index = self.es_manager.client, self.es_manager.index_name
+        client = self.es_manager.client
         knn = None
         if query_vector is not None:
             knn = {
@@ -128,11 +135,14 @@ class HybridRetriever:
         lexical_text: str,
         query_vector: Optional[List[float]],
         effective_acl_tags: Sequence[str],
+        tenant: str,
     ) -> tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]:
         query_tokens = _memory_tokens(lexical_text)
         dense: List[Dict[str, Any]] = []
         lexical: List[Dict[str, Any]] = []
         for rec in self.es_manager.memory_chunks:
+            if (rec.get("tenant") or DEFAULT_TENANT) != tenant:
+                continue
             # Soft-superseded versions stay in storage but are excluded from retrieval.
             if rec.get("is_current") is False or rec.get("ingestion_status") in {"SUPERSEDED", "ARCHIVED"}:
                 continue
@@ -164,8 +174,11 @@ class HybridRetriever:
         resolved_config: RetrievalProfile | None = None,
         fusion: str | None = None,
         candidate_k: int | None = None,
+        *,
+        tenant: str,
     ) -> HybridSearchOutcome:
-        """Return up to ``candidate_k or top_k`` chunks, trust-ranked, with the ACL pushed into every search."""
+        """Return up to ``candidate_k or top_k`` chunks, trust-ranked, with tenant and ACL pushed into every search."""
+        tenant = require_tenant(tenant)
         profile: RetrievalProfile = resolved_config or get_retrieval_profile(profile_name, top_k_override=top_k)
         mode = fusion or self.fusion
         if mode not in FUSION_MODES:
@@ -174,16 +187,19 @@ class HybridRetriever:
         fetch_size = candidate_k or effective_top_k * _RERANK_OVERFETCH
         vector_size = len(query_vector) if query_vector is not None else 0
         acl_filter_clause = {"terms": {"acl_tags": effective_acl_tags}}
+        tenant_filter_clause = {"term": {"tenant": tenant}}
+        index = self.es_manager.index_for(tenant)
         es_query_dsl = {
+            "index": index,
             "size": fetch_size,
             "fusion": mode,
-            "query": self._lexical_query(expanded_query, profile, [acl_filter_clause]),
+            "query": self._lexical_query(expanded_query, profile, [tenant_filter_clause, acl_filter_clause]),
             "knn": {
                 "field": "embedding",
                 "query_vector": f"<{vector_size}-dim Dense Vector>",
                 "k": fetch_size,
                 "num_candidates": max(20, fetch_size, profile.top_k * profile.num_candidates_multiplier),
-                "filter": acl_filter_clause,
+                "filter": [tenant_filter_clause, acl_filter_clause],
             },
         }
 
@@ -202,17 +218,23 @@ class HybridRetriever:
         }
 
         if self.es_manager.is_online():
-            self.es_manager.ensure_index()
+            self.es_manager.ensure_index(tenant)
             candidates, rankings = self._es_candidates(
-                mode, expanded_query, query_vector, profile, [acl_filter_clause, current_only_filter], fetch_size
+                mode,
+                expanded_query,
+                query_vector,
+                profile,
+                [tenant_filter_clause, acl_filter_clause, current_only_filter],
+                fetch_size,
+                index,
             )
             elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
             authorized_chunks = apply_trust_ranking(candidates)[:effective_top_k]
             masked_restricted_docs = self._audit_masked(
-                expanded_query, profile, acl_filter_clause, current_only_filter
+                expanded_query, profile, acl_filter_clause, current_only_filter, tenant_filter_clause, index
             )
         else:
-            candidates, rankings = self._memory_candidates(mode, expanded_query, query_vector, effective_acl_tags)
+            candidates, rankings = self._memory_candidates(mode, expanded_query, query_vector, effective_acl_tags, tenant)
             authorized_chunks = apply_trust_ranking(candidates)[:effective_top_k]
             elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
 
@@ -230,7 +252,10 @@ class HybridRetriever:
         profile: RetrievalProfile,
         acl_filter_clause: Dict[str, Any],
         current_only_filter: Dict[str, Any],
+        tenant_filter_clause: Dict[str, Any],
+        index: str,
     ) -> List[Dict[str, Any]]:
+        """Name the caller's own tenant's documents that their roles hide. Never another tenant's."""
         domain_keywords = " ".join(
             w.strip("?.,!\"'()？，。！")
             for w in expanded_query.split()
@@ -239,7 +264,7 @@ class HybridRetriever:
             and not has_cjk(w)
         )
         unfiltered_resp = self.es_manager.client.search(
-            index=self.es_manager.index_name,
+            index=index,
             size=profile.audit_masked_size,
             _source=["doc_id", "filename", "page_number", "acl_tags", "is_public"],
             query={
@@ -256,7 +281,7 @@ class HybridRetriever:
                     ],
                     # The audit must not reveal retired content either.
                     "must_not": [acl_filter_clause],
-                    "filter": [current_only_filter],
+                    "filter": [tenant_filter_clause, current_only_filter],
                 }
             },
         )

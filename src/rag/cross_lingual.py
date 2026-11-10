@@ -29,6 +29,7 @@ from src.rag.language_packs import (
     get_language_pack_registry,
 )
 from src.rag.models import Concept
+from src.rag.tenancy import DEFAULT_TENANT, normalize_tenant
 
 # Re-export for Episode 2 acceptance / data-driven language hooks.
 __all__ = [
@@ -165,12 +166,21 @@ def _should_casefold_field(field_name: str, packs: LanguagePackRegistry) -> bool
 
 
 class DynamicConceptRegistry:
-    """Manages dynamically extracted concept mappings persisted in dynamic_concepts.json."""
+    """Manages dynamically extracted concept mappings persisted in dynamic_concepts.json.
+
+    Concepts are LLM output about a document's content, and they expand later queries. If
+    they were shared, one tenant's vocabulary (project names, product codes) would be
+    added to another tenant's searches. So each tenant has its own concepts and its own
+    query-translation cache, and every method reads or writes one tenant only.
+    """
 
     def __init__(self, storage_path: Path = DYNAMIC_CONCEPTS_PATH) -> None:
         self.storage_path = storage_path
+        # The ``default`` tenant keeps the top-level keys of the earlier file format.
         self._documents: Dict[str, Dict[str, Any]] = {}
         self._query_cache: Dict[str, str] = {}
+        # tenant -> {"documents": {...}, "query_cache": {...}} for every other tenant.
+        self._tenants: Dict[str, Dict[str, Dict[str, Any]]] = {}
         self._load()
 
     def _load(self) -> None:
@@ -181,33 +191,55 @@ class DynamicConceptRegistry:
             if isinstance(raw, dict):
                 self._documents = raw.get("documents", {})
                 self._query_cache = raw.get("query_cache", {})
+                self._tenants = {
+                    normalize_tenant(tenant): {
+                        "documents": dict((scoped or {}).get("documents") or {}),
+                        "query_cache": dict((scoped or {}).get("query_cache") or {}),
+                    }
+                    for tenant, scoped in (raw.get("tenants") or {}).items()
+                }
         except Exception:
             self._documents = {}
             self._query_cache = {}
+            self._tenants = {}
 
     def _save(self) -> None:
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "documents": self._documents,
             "query_cache": self._query_cache,
+            "tenants": self._tenants,
         }
         self.storage_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
+    def _docs(self, tenant: str | None) -> Dict[str, Dict[str, Any]]:
+        scope = normalize_tenant(tenant)
+        if scope == DEFAULT_TENANT:
+            return self._documents
+        return self._tenants.setdefault(scope, {"documents": {}, "query_cache": {}})["documents"]
+
+    def _cache(self, tenant: str | None) -> Dict[str, str]:
+        scope = normalize_tenant(tenant)
+        if scope == DEFAULT_TENANT:
+            return self._query_cache
+        return self._tenants.setdefault(scope, {"documents": {}, "query_cache": {}})["query_cache"]
+
     def get_all_concepts(
         self,
         *,
         pack_registry: Optional[LanguagePackRegistry] = None,
+        tenant: str | None = None,
     ) -> List[Tuple[str, Dict[str, List[str]], str]]:
-        """Return (concept_id, triggers_by_field, expansion) using pack-configured field names."""
+        """Return one tenant's (concept_id, triggers_by_field, expansion), using pack field names."""
         packs = pack_registry or get_language_pack_registry()
         expansion_field = packs.expansion_field()
         configured = set(packs.trigger_fields())
         concepts: List[Tuple[str, Dict[str, List[str]], str]] = []
         seen_ids: set[str] = set()
-        for doc_entry in self._documents.values():
+        for doc_entry in self._docs(tenant).values():
             for item in doc_entry.get("concepts", []):
                 cid = str(item.get("concept_id", "")).strip()
                 if not cid or cid in seen_ids:
@@ -232,8 +264,11 @@ class DynamicConceptRegistry:
                     concepts.append((cid, triggers_by_field, expansion))
         return concepts
 
-    def get_document_concepts(self, content_hash: str) -> List[Dict[str, Any]] | None:
-        entry = self._documents.get(content_hash)
+    def get_document_entry(self, content_hash: str, *, tenant: str | None = None) -> Dict[str, Any] | None:
+        return self._docs(tenant).get(content_hash)
+
+    def get_document_concepts(self, content_hash: str, *, tenant: str | None = None) -> List[Dict[str, Any]] | None:
+        entry = self._docs(tenant).get(content_hash)
         if entry and isinstance(entry.get("concepts"), list) and entry["concepts"]:
             return entry["concepts"]
         return None
@@ -244,16 +279,18 @@ class DynamicConceptRegistry:
         filename: str,
         concepts: List[Dict[str, Any]],
         model_used: str,
+        *,
+        tenant: str | None = None,
     ) -> None:
-        self._documents[content_hash] = {
+        self._docs(tenant)[content_hash] = {
             "filename": filename,
             "model_used": model_used,
             "concepts": concepts,
         }
         self._save()
 
-    def forget(self, concept_ids: List[str], *, subject_id: str | None = None) -> int:
-        """Remove concepts derived from erased documents, plus any cache entry naming the subject.
+    def forget(self, concept_ids: List[str], *, subject_id: str | None = None, tenant: str | None = None) -> int:
+        """Remove one tenant's concepts derived from erased documents, plus any cache entry naming the subject.
 
         Concepts are LLM output about a document's content, so they are derived personal data.
         Query translations can also contain a name somebody typed into the chat box.
@@ -261,31 +298,47 @@ class DynamicConceptRegistry:
         ids = set(concept_ids)
         needle = (subject_id or "").lower()
         removed = 0
-        for key, entry in list(self._documents.items()):
+        documents, cache = self._docs(tenant), self._cache(tenant)
+        for key, entry in list(documents.items()):
             entry_ids = {str(item.get("concept_id")) for item in entry.get("concepts", [])}
             if entry_ids & ids or (needle and needle in json.dumps(entry, ensure_ascii=False).lower()):
-                del self._documents[key]
+                del documents[key]
                 removed += 1
         if needle:
-            for query, keywords in list(self._query_cache.items()):
+            for query, keywords in list(cache.items()):
                 if needle in query.lower() or needle in str(keywords).lower():
-                    del self._query_cache[query]
+                    del cache[query]
                     removed += 1
         if removed:
             self._save()
         return removed
 
-    def count_mentions(self, subject_id: str) -> int:
+    def forget_tenant(self, tenant: str) -> int:
+        """Offboarding: drop every concept and cached query one tenant produced."""
+        scope = normalize_tenant(tenant)
+        if scope == DEFAULT_TENANT:
+            removed = len(self._documents) + len(self._query_cache)
+            self._documents, self._query_cache = {}, {}
+        else:
+            scoped = self._tenants.pop(scope, None) or {}
+            removed = len(scoped.get("documents") or {}) + len(scoped.get("query_cache") or {})
+        if removed:
+            self._save()
+        return removed
+
+    def count_mentions(self, subject_id: str, *, tenant: str | None = None) -> int:
         needle = subject_id.lower()
-        documents = sum(1 for entry in self._documents.values() if needle in json.dumps(entry, ensure_ascii=False).lower())
-        queries = sum(1 for query, keywords in self._query_cache.items() if needle in f"{query} {keywords}".lower())
+        documents = sum(
+            1 for entry in self._docs(tenant).values() if needle in json.dumps(entry, ensure_ascii=False).lower()
+        )
+        queries = sum(1 for query, keywords in self._cache(tenant).items() if needle in f"{query} {keywords}".lower())
         return documents + queries
 
-    def get_cached_query_translation(self, query: str) -> str | None:
-        return self._query_cache.get(query.strip())
+    def get_cached_query_translation(self, query: str, *, tenant: str | None = None) -> str | None:
+        return self._cache(tenant).get(query.strip())
 
-    def cache_query_translation(self, query: str, english_keywords: str) -> None:
-        self._query_cache[query.strip()] = english_keywords.strip()
+    def cache_query_translation(self, query: str, english_keywords: str, *, tenant: str | None = None) -> None:
+        self._cache(tenant)[query.strip()] = english_keywords.strip()
         self._save()
 
 
@@ -316,17 +369,22 @@ def extract_concepts_at_ingestion(
     full_text: str,
     force_refresh: bool = False,
     pack_registry: Optional[LanguagePackRegistry] = None,
+    tenant: str | None = None,
 ) -> Tuple[List[Dict[str, Any]], str]:
-    """Extract or retrieve cached concept mappings for uploaded documents."""
+    """Extract or retrieve cached concept mappings for uploaded documents.
+
+    The cache is per tenant. Two tenants uploading the same text each get their own entry,
+    so erasing one tenant's document never removes the other's concepts.
+    """
     registry = get_concept_registry()
     packs = pack_registry or get_language_pack_registry()
     content_hash = hashlib.sha256(full_text.strip().encode("utf-8")).hexdigest()[:16]
 
     if not force_refresh:
-        cached = registry.get_document_concepts(content_hash)
+        cached = registry.get_document_concepts(content_hash, tenant=tenant)
         if cached:
-            model_name = registry._documents.get(content_hash, {}).get("model_used", "ollama-cached")
-            return cached, model_name
+            entry = registry.get_document_entry(content_hash, tenant=tenant) or {}
+            return cached, entry.get("model_used", "ollama-cached")
 
     model_name = _select_ollama_model()
     system_prompt, user_prompt = packs.concept_extraction_prompts(
@@ -394,6 +452,7 @@ def extract_concepts_at_ingestion(
             filename=filename,
             concepts=extracted_concepts,
             model_used=f"ollama/{model_name}",
+            tenant=tenant,
         )
 
     return extracted_concepts, f"ollama/{model_name}"
@@ -406,8 +465,9 @@ extract_bilingual_concepts_at_ingestion = extract_concepts_at_ingestion
 def expand_cross_lingual_query(
     query: str,
     pack_registry: Optional[LanguagePackRegistry] = None,
+    tenant: str | None = None,
 ) -> Tuple[str, List[str]]:
-    """Expand query with registered multilingual triggers from language packs."""
+    """Expand query with one tenant's registered multilingual triggers from language packs."""
     packs = pack_registry or get_language_pack_registry()
     lowered = query.lower()
     matched_concepts: List[str] = []
@@ -424,7 +484,7 @@ def expand_cross_lingual_query(
     configured_fields = set(packs.trigger_fields())
 
     for concept_id, triggers_by_field, expansion in get_concept_registry().get_all_concepts(
-        pack_registry=packs
+        pack_registry=packs, tenant=tenant
     ):
         hit = False
         matched_via_non_corpus = False
@@ -561,23 +621,27 @@ class MultilingualQueryAdapter:
         self,
         filename: str,
         full_text: str,
+        tenant: str | None = None,
     ) -> Tuple[List[Dict[str, Any]], str]:
         return extract_concepts_at_ingestion(
             filename,
             full_text,
             pack_registry=self.language_pack,
+            tenant=tenant,
         )
 
     def prepare_query(
         self,
         question: str,
         allow_llm_fallback: bool = False,
+        tenant: str | None = None,
     ) -> Tuple[str, List[str]]:
         """Prepare search query with language detection, concept expansion, and fallback translation."""
         source_lang = self.detector.detect(question)
         expanded_query, matched_concepts = expand_cross_lingual_query(
             question,
             pack_registry=self.language_pack,
+            tenant=tenant,
         )
 
         if matched_concepts or source_lang == self.corpus_language:

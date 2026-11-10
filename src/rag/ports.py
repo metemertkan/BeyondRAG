@@ -47,7 +47,10 @@ class IndexManagerPort(Protocol):
     def is_online(self) -> bool:
         ...
 
-    def ensure_index(self) -> None:
+    def index_for(self, tenant: str | None) -> str:
+        ...
+
+    def ensure_index(self, tenant: str | None = None) -> str:
         ...
 
     def reset_index(self) -> None:
@@ -102,13 +105,14 @@ class DocumentRepositoryPort(Protocol):
     def delete_upload_file(self, doc_id: str) -> None:
         ...
 
-    def delete_chunks(self, doc_id: str) -> None:
+    def delete_chunks(self, doc_id: str, *, tenant: str | None = None) -> None:
         ...
 
     def save_chunks(self, chunks: Sequence[Dict[str, Any]]) -> None:
         ...
 
-    def list_documents(self) -> List[Dict[str, Any]]:
+    def list_documents(self, *, tenant: str, include_superseded: bool = True) -> List[Dict[str, Any]]:
+        """One tenant's documents. The tenant is required: there is no cross-tenant listing."""
         ...
 
     def update_document_acl(
@@ -116,10 +120,12 @@ class DocumentRepositoryPort(Protocol):
         doc_id: str,
         acl_tags: List[str],
         is_public: bool,
+        *,
+        tenant: str | None = None,
     ) -> None:
         ...
 
-    def delete_document(self, doc_id: str) -> Dict[str, Any]:
+    def delete_document(self, doc_id: str, *, tenant: str | None = None) -> Dict[str, Any]:
         ...
 
 
@@ -132,7 +138,8 @@ class DocumentRegistryPort(Protocol):
     def set_document_state(self, report: IngestionReport) -> None:
         ...
 
-    def get_current_doc_id(self, source_key: str) -> Optional[str]:
+    def get_current_doc_id(self, source_key: str, tenant: str | None = None) -> Optional[str]:
+        """A logical document is (tenant, source_key), never source_key alone."""
         ...
 
     def mark_superseded(self, doc_id: str) -> None:
@@ -144,7 +151,9 @@ class DocumentRegistryPort(Protocol):
     def set_index_embedding_manifest(self, manifest_id: str) -> None:
         ...
 
-    def list_registry_documents(self, *, current_only: bool = False) -> List[IngestionReport]:
+    def list_registry_documents(
+        self, *, current_only: bool = False, tenant: str | None = None
+    ) -> List[IngestionReport]:
         ...
 
 
@@ -178,6 +187,7 @@ class CrossLingualPort(Protocol):
         self,
         filename: str,
         full_text: str,
+        tenant: str | None = None,
     ) -> Tuple[List[Dict[str, Any]], str]:
         ...
 
@@ -185,12 +195,17 @@ class CrossLingualPort(Protocol):
         self,
         question: str,
         allow_llm_fallback: bool = False,
+        tenant: str | None = None,
     ) -> Tuple[str, List[str]]:
         ...
 
 
 class HybridRetrieverPort(Protocol):
-    """Port 8: Pre-filtered hybrid (`BM25 + int8_hnsw`) retrieval & RBAC mask auditing."""
+    """Port 8: Pre-filtered hybrid (`BM25 + int8_hnsw`) retrieval & RBAC mask auditing.
+
+    ``tenant`` is keyword-only and has no default. A search that forgets it fails with a
+    ``TypeError`` instead of running across every tenant.
+    """
 
     def search(
         self,
@@ -201,6 +216,8 @@ class HybridRetrieverPort(Protocol):
         profile_name: str | None = None,
         fusion: str | None = None,
         candidate_k: int | None = None,
+        *,
+        tenant: str,
     ) -> HybridSearchOutcome:
         ...
 

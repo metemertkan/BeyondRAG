@@ -10,6 +10,7 @@ Most RAG tutorials stop at chunking a single PDF for a single user. A company-wi
 | [**#02**](#episode-2--production-document-ingestion) | Production document ingestion | Complex formats, multilingual processing, semantic chunking, versioning and ground-truth decay, GDPR deletion, continuous evaluation |
 | [**#03**](#episode-3--retrieval-at-scale) | Retrieval at scale | Vector quantization, hybrid search with RRF, query transformation, parent-child chunks, cross-encoder re-ranking, multi-hop retrieval, context reordering |
 | [**#04**](#episode-4--trustworthy-answers) | Trustworthy answers | Per-sentence citations, hallucination checks, a measured LLM checker, abstention, a trust report per answer |
+| [**#05**](#episode-5--multi-tenant-isolation) | Multi-tenant isolation | Signed identity, a required tenant scope on every read and write, pool and silo index layouts, tenant offboarding, 22 cross-tenant attacks run before and after |
 
 ---
 
@@ -28,6 +29,9 @@ Open **`http://localhost:8090`**:
    - See every indexed document, including superseded versions, and its live `✓ Unlocked` / `🔒 Locked` state as you switch roles in the top bar.
 2. **Right panel (`2. Multi-Lingual RBAC Chat`):**
    - Click a pre-generated query (`[Public]`, `[Finance]`, `[Operation]`) while switching between `Public Only`, `Finance Role`, `Operation Role` and `All Roles`.
+3. **Top bar (`Tenant`):** switch between the two demo companies, `acme` and `globex`. Same roles, same questions, different documents. Uploading needs the `Admin` role.
+
+The dashboard signs itself in with demo tokens. That is for a laptop only: see [Episode 5](#episode-5--multi-tenant-isolation) before putting this on a network.
 
 LLM features use Gemini when `GOOGLE_API_KEY` is set, and local Ollama otherwise. Copy `.env.example` to `.env` to configure them.
 
@@ -311,6 +315,125 @@ Checking one answer took about 46 s on CPU, on top of about 27 s to write it.
 
 ---
 
+## Episode 5 — Multi-Tenant Isolation
+
+Episodes 1 to 4 served one company. Episode 5 puts two companies in the same deployment and asks what stops one from reading, changing or deleting the other's data. Before this episode the honest answer was: nothing. Roles say what a user may read inside a company. They say nothing about which company, and `finance` at Acme was also `finance` at Globex.
+
+Measurements come from [`scripts/ep5_benchmark.py`](./scripts/ep5_benchmark.py) on one local CPU machine. The two invented companies and their documents are in [`scripts/ep5_fixtures.py`](./scripts/ep5_fixtures.py), and the attacks in [`scripts/ep5_attack_runner.py`](./scripts/ep5_attack_runner.py).
+
+Earlier episodes already cover related ground: [Episode 1](#episode-1--access-management--cross-language-retrieval) filters by role inside Elasticsearch, and the tenant filter sits in the same place for the same reason. [Episode 2](#episode-2--production-document-ingestion) built versioning, erasure, tombstones and source sync, and every one of them turned out to be a way across tenants.
+
+### How it works
+
+- **Identity comes from a signed token.** An HS256 JWT carries one tenant, the roles and an expiry. `user_roles` and `tenant` in a request body are ignored. No token, a bad signature, `alg: none`, an expired token, a wildcard tenant or two tenants all get the same 401.
+- **Every read names exactly one tenant.** `tenant` is a required argument from the API down to the query builder. There is no default and no "all tenants". A search without one raises instead of running.
+- **The tenant is a filter inside the search.** It is in the BM25 half, the kNN half and the audit query that lists masked documents, next to the role filter from Episode 1.
+- **Everything keyed by name is keyed by tenant too.** Document ids, source keys, SQLite tables, content tombstones, sync event ids, extracted concepts and the query cache.
+- **Another tenant's document does not exist.** Retagging or deleting a foreign id answers the same 404, with the same body, as an id that was never issued.
+- **Writes need a role.** Upload, retag and delete need a role from `RAG_WRITE_ROLES` (default `admin`) in the caller's own tenant.
+- **Operator endpoints name their tenant.** Erasure and source sync take an explicit `tenant`. `POST /api/tenants/{tenant}/offboard` removes one tenant's chunks, files, tables, concepts and tombstones.
+- **Two layouts.** `RAG_TENANT_MODE=shared` keeps one index and filters it (pool). `per_tenant` gives each tenant its own index and keeps the filter as a second check (silo).
+- **Less on the outside.** `/api/health` reports liveness only, CORS is off unless `RAG_CORS_ORIGINS` lists an origin, and nothing is reset or seeded at start in `required` mode.
+
+### Try it
+
+```bash
+# .env
+RAG_AUTH_MODE=required
+RAG_AUTH_SECRET=$(python -c "import secrets; print(secrets.token_urlsafe(48))")
+
+# Mint a token the way your identity provider would
+TOKEN=$(python -c "from src.rag.auth import mint_token; print(mint_token('acme', ['finance'], subject='alice'))")
+
+curl -s localhost:8090/api/chat -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"question": "What is the intraday minimum cash reserve?"}'
+
+# Offboard a tenant. Operator only, and the tenant is typed twice.
+curl -s -X POST localhost:8090/api/tenants/acme/offboard -H "X-Governance-Token: $RAG_GOVERNANCE_TOKEN" \
+  -H "Content-Type: application/json" -d '{"confirm": "acme"}'
+```
+
+In `demo` mode (the default) the dashboard has a tenant switch and mints its own tokens.
+
+### Results
+
+**22 attacks, three configurations.** An Acme user goes after Globex. A breach means a string that exists only in a Globex document came back, or Globex's own data changed. Each attack starts from an empty index, and Globex first reads its own document as a control.
+
+| | Before Episode 5 | Before, behind a gateway | Episode 5 |
+| :--- | :---: | :---: | :---: |
+| Read attacks (11) | 11 breached | 9 breached | **0** |
+| Write attacks (6) | 4 breached | 4 breached | **0** |
+| Operator attacks (5) | 4 breached | 4 breached | **0** |
+| **Total (22)** | **19** | **17** | **0** |
+
+- **The gateway** is simulated: it rejects anonymous callers, writes the caller's true roles and tenant into the request, and allows writes for admins only. It stopped two attacks, role spoofing and anonymous reads. The rest got through because the API had no tenant filter for the gateway to set. An Acme finance user asked about Globex's acquisition budget and got it, without lying about anything.
+- **The breaches share one root cause,** a missing tenant dimension, so 19 is a count of ways in, not of 19 separate bugs. Among them: retagging Globex's restricted policy to public, superseding it by uploading under its source key, planting a document that Globex's finance team then received as a source, listing every document and tag, and reading a figure through the concept expansion of a Chinese query.
+- **Erasure crossed tenants in both directions.** Erasing a customer's records for Acme also removed Globex's. Erasing a file for Acme left a tombstone that refused Globex's upload of the same bytes. A Globex delete event was dropped as a duplicate because Acme had used the event id first.
+- **Three attacks failed before Episode 5 too.** Source keys were already prefixed by tenant, so the same file in two tenants stayed two documents and erasing a file by name removed only the caller's copy. Document ids could not be probed either, because retagging said "updated" for any id. The prefix did not help against the supersede attack, since the tenant was a form field the caller filled in.
+- **12 forged tokens,** all rejected with 401: no token, random text, `alg: none`, a made-up key, an edited tenant, expired, HS512, another audience, no tenant, tenant `*`, two tenants, no expiry.
+- **Restart.** Before Episode 5 the app reset the index and reloaded samples on every start. In `required` mode the data is still there.
+
+The concept-extraction LLM call at ingestion is replaced by a stub in all three configurations, and embeddings are `feature_hash`, so the run needs no model. Write attacks assume the attacker knows the victim's document id, which the old document list handed out.
+
+**The prompt is not a boundary.** 30 questions from an Acme user, `qwen3:8b`, temperature 0. In one arm the search has no tenant filter and the system prompt says to use only Acme's sources, never to reveal another tenant's, and to reply "I can't help with that." otherwise. In the other arm the Episode 5 search runs.
+
+| Question type (5 each) | Tenant rule in the prompt | Tenant filter in the query |
+| :--- | :---: | :---: |
+| Plain question about Globex | 5 leaked | 0 |
+| Claims authority ("audit ticket SEC-4412") | 5 leaked | 0 |
+| Overrides instructions ("ignore all previous...") | 5 leaked | 0 |
+| Asks indirectly (a poem, digits only, fill the blank) | 4 leaked | 0 |
+| Instruction planted in Acme's own document | 5 leaked | 0 |
+| Honest question about Acme's own data | 0 leaked | 0 |
+| **Total (30)** | **24** | **0** |
+
+No trick was needed. The plain question leaked 5 times out of 5, and the answer named its source: "This information is from the Globex Treasury Liquidity Policy Q4 document." The one indirect question that didn't leak retrieved no sources at all. With the filter, Globex's text never reached the prompt, so there was nothing to leak. A planted instruction inside Acme's own documents was still followed, it just had nothing foreign to reveal. This is one small model and one prompt. A stronger model will refuse more often, but "more often" is not isolation.
+
+**Pool or silo.** 95,000 chunks, 256-dim synthetic vectors, 106 tenants: one of 60,000 chunks, five of 5,000 and a hundred of 100. 100 queries per tenant through the product's dense search with its tenant, role and lifecycle filters.
+
+| | Pool (1 index) | Silo (106 indices) |
+| :--- | :---: | :---: |
+| Recall@10, large / medium / small tenant | 0.88 / 0.94 / 0.94 | 0.90 / 0.94 / 0.93 |
+| Latency p50, large / medium / small tenant | 5.4 / 6.2 / 4.9 ms | 6.0 / 6.0 / 5.5 ms |
+| Disk | 424 MB | 425 MB |
+| Creating the tenants' indices | none | 48 s (0.45 s each) |
+| Shards | 1 + 1 replica | 106 + 106 replicas |
+| Offboarding the 60,000-chunk tenant | 2.2 s to delete, about 20 s more to get the disk back | **0.1 s** |
+
+- **Search quality and speed did not separate the two at this size.** The small tenant's recall moved by 2 points between identical runs. Only the large tenant was consistently a little better alone (0.90 against 0.88).
+- **Offboarding did.** In the pool the tenant's chunks stopped being searchable after 2.2 s, but the index then grew from 424 MB to 757 MB while Elasticsearch rewrote its segments, and reached 157 MB about 20 s later. In the silo, dropping the index took 0.1 s and freed 267 MB.
+- **The silo's cost is shards.** Elasticsearch allows 1,000 per node by default, replicas included, so about 500 tenants per node at these settings.
+
+**What a shared index still leaks.** BM25 scores depend on how common a word is in the whole index, not in the caller's tenant. An Acme user uploads two of their own documents, one with the word "nightjar" and one with a control word, searches their own tenant with `fusion: "lexical"` and compares the two scores:
+
+| Globex chunks containing "nightjar" | 0 | 1 | 5 | 25 | 100 |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| Pool: score ratio | 1.00 | 0.91 | 0.76 | 0.52 | 0.31 |
+| Pool: Acme's estimate | 0 | 1 | 5 | 25 | 100 |
+| Silo: score ratio | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+
+No Globex document was returned in any run, and the estimate was exact every time. One more upload gave Acme the size of the whole index, Globex included. This is a best case for the attacker: every document has the same length, and the scores were read at the retriever, the layer `/api/chat` calls. It shows that the filter hides documents, not statistics. Whether a project code name exists in a competitor's documents can be the secret. The silo does not have this channel.
+
+### Limits worth knowing
+
+- **HS256 is a shared secret.** Whoever holds `RAG_AUTH_SECRET` can mint a token for any tenant. A real deployment verifies tokens from an identity provider with public keys. That is not implemented.
+- **Demo mode is open by design.** Anyone who can reach the port can ask for a token for either demo tenant.
+- **The operator token crosses tenants.** `X-Governance-Token` can erase from or offboard any tenant it names.
+- **Isolation is logical.** One process, one disk, one SQLite file, one LLM, no per-tenant encryption keys, rate limits or quotas. A busy tenant can still slow the others down.
+- **The pool shares term statistics,** as measured above. The rank-based default (`rrf`) hides raw scores, but that was not measured as a defence.
+- **The attacks were written by the person who wrote the fix.** They are regression tests for known ways in, not a penetration test. The silo layout is covered by the unit tests, not by the attack run.
+
+### Upgrading from Episode 4
+
+- Every data endpoint needs `Authorization: Bearer <token>`. Without one the answer is 401.
+- `user_roles` in a chat request and `tenant` in an upload form are ignored.
+- Upload, retag and delete need the `admin` role.
+- `/api/erasure` and `/api/sync/events` need `tenant` in the body.
+- Chunks indexed before Episode 5 have no `tenant` field and are no longer returned. Re-ingest them.
+- `/api/health` no longer returns the index name, document count or tag list.
+
+---
+
 ## Repository Structure
 
 ```text
@@ -350,10 +473,12 @@ BeyondRAG/
 │   │   ├── reranker.py       # 21. Cross-encoder adapter
 │   │   ├── pipeline.py       # 22. Retrieval pipeline and its trace
 │   │   ├── multi_hop.py      # 23. Question decomposition and dependent searches
-│   │   └── trust.py          # 24. Citations, value and LLM checks, abstention policy
+│   │   ├── trust.py          # 24. Citations, value and LLM checks, abstention policy
+│   │   ├── tenancy.py        # 25. Tenant scope: one required tenant per read, scoped ids and keys
+│   │   └── auth.py           # 26. Signed bearer tokens: mint, verify, demo and required modes
 │   ├── eval/                 # Golden-dataset harness and LLM-as-a-judge metrics
 │   └── web/
-│       ├── app.py            # REST API (/api/upload, /api/documents, /api/chat, /api/erasure, /api/sync/events)
+│       ├── app.py            # REST API (/api/upload, /api/documents, /api/chat, /api/erasure, /api/sync/events, /api/tenants/{tenant}/offboard)
 │       └── static/
 │           └── index.html    # 2-Section Web UI (Document Upload & KB List + Multi-Lingual Chat)
 ├── scripts/                  # Eval gate, showcase measurements and fixture generators
@@ -379,8 +504,13 @@ BeyondRAG/
 | `RAG_CHUNKING_STRATEGY` | `sliding_window` (Compose: `adaptive`) | Active chunking algorithm: `sliding_window`, `paragraph`, `sentence`, `recursive`, `semantic`, `adaptive`. |
 | `RAG_CHUNK_MAX_TOKENS` | `500` | Maximum token/character limit per chunk. |
 | `RAG_CHUNK_OVERLAP_TOKENS`| `80` | Overlap budget between consecutive chunks. |
-| `RAG_INDEX_PREFIX` | `hk-rbac-rag-kb` | Elasticsearch index name or prefix. |
-| `RAG_TENANT_MODE` | `shared` | Multi-tenancy mode: `shared` or `per_tenant`. |
+| `RAG_INDEX_PREFIX` | `hk-rbac-rag-kb` | Elasticsearch index name in `shared` mode, and the prefix of `{prefix}-{tenant}` in `per_tenant` mode. |
+| `RAG_TENANT_MODE` | `shared` | `shared`: one index, every query filtered by tenant (pool). `per_tenant`: one index per tenant plus the same filter (silo). |
+| `RAG_AUTH_MODE` | `demo` | `demo`: the dashboard mints its own tokens, and the index is reset and seeded at start. `required`: every request needs a bearer token signed with `RAG_AUTH_SECRET`, nothing is reset or seeded, and the demo-token and seed endpoints return 404. |
+| `RAG_AUTH_SECRET` | _(empty)_ | HS256 signing key, at least 32 bytes. Empty in `demo` mode: one is generated under `workspace/`. Empty in `required` mode: data endpoints return 503. |
+| `RAG_WRITE_ROLES` | `admin` | Roles allowed to upload, retag and delete inside their own tenant. |
+| `RAG_CORS_ORIGINS` | _(empty)_ | Browser origins allowed to call the API from another site. Empty means none. |
+| `RAG_DEFAULT_TENANT` | `default` | Tenant for writes that name none. Reads always name one. |
 | `RAG_BASELINE_ROLES` | `finance,operation` | Default enterprise baseline roles. |
 | `RAG_CORPUS_LANGUAGE` | `en` | Primary language of the document corpus. |
 | `RAG_XLSX_INLINE_ROWS` | `40` | Sheets over this many rows become one summary chunk plus a SQLite table. |
@@ -422,3 +552,4 @@ Some existing tests rewrite the tracked `workspace/dynamic_concepts.json`. Resto
 - [x] **Episode #02:** Production document ingestion: complex formats, multilingual processing, semantic chunking, versioning and ground-truth decay, GDPR deletion, continuous evaluation
 - [x] **Episode #03:** Retrieval at scale: quantization, hybrid search with RRF, query transformation, parent-child chunks, re-ranking, multi-hop retrieval, context reordering
 - [x] **Episode #04:** Trustworthy answers: citations, hallucination checks, abstention, trust reports
+- [x] **Episode #05:** Multi-tenant isolation: signed identity, a required tenant scope, pool and silo layouts, offboarding, 22 cross-tenant attacks run before and after

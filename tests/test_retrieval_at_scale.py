@@ -167,6 +167,7 @@ def _record(chunk_id: str, content: str, **extra: Any) -> Dict[str, Any]:
         "page_number": 1,
         "content": content,
         "acl_tags": ["__public__"],
+        "tenant": "default",
         "embedding": [0.5, 0.5, 0.5, 0.5],
         **extra,
     }
@@ -181,7 +182,7 @@ def test_hybrid_finds_an_exact_code_when_dense_cannot_separate_documents():
         ]
     )
     vector = ConstantEmbedder().embed("")
-    hybrid = retriever.search("ERR-1042", vector, ["__public__"], top_k=1, fusion="rrf")
+    hybrid = retriever.search("ERR-1042", vector, ["__public__"], top_k=1, fusion="rrf", tenant="default")
     assert hybrid.authorized_chunks[0]["chunk_id"] == "right-code"
 
 
@@ -191,7 +192,7 @@ def test_acl_filters_every_retriever_mode():
     )
     vector = ConstantEmbedder().embed("")
     for mode in ("rrf", "dense", "lexical"):
-        outcome = retriever.search("ACME-X200", vector, ["__public__"], top_k=5, fusion=mode)
+        outcome = retriever.search("ACME-X200", vector, ["__public__"], top_k=5, fusion=mode, tenant="default")
         assert [c["chunk_id"] for c in outcome.authorized_chunks] == ["open"], mode
 
 
@@ -203,14 +204,14 @@ def test_superseded_and_expired_chunks_stay_out_of_lexical_results():
             _record("now", "ACME-X200 current price"),
         ]
     )
-    outcome = retriever.search("ACME-X200", None, ["__public__"], top_k=5, fusion="lexical")
+    outcome = retriever.search("ACME-X200", None, ["__public__"], top_k=5, fusion="lexical", tenant="default")
     assert [c["chunk_id"] for c in outcome.authorized_chunks] == ["now"]
 
 
 def test_unknown_fusion_mode_is_refused():
     retriever = _memory_retriever([])
     with pytest.raises(ValueError, match="Unknown fusion mode"):
-        retriever.search("q", None, ["__public__"], fusion="magic")
+        retriever.search("q", None, ["__public__"], fusion="magic", tenant="default")
 
 
 # --- Query transformation -------------------------------------------------------------
@@ -326,8 +327,8 @@ def stack(tmp_path: Any) -> SimpleNamespace:
     repository = DocumentRepository(es_manager=manager, uploads_dir=tmp_path / "uploads", registry_path=tmp_path / "registry.json")
     cross_lingual = SimpleNamespace(
         is_cross_lingual=lambda text: False,
-        extract_concepts_at_ingestion=lambda filename, full_text: ([], "none"),
-        prepare_query=lambda question, allow_llm_fallback=False: (question, []),
+        extract_concepts_at_ingestion=lambda filename, full_text, tenant=None: ([], "none"),
+        prepare_query=lambda question, allow_llm_fallback=False, tenant=None: (question, []),
     )
     ingestor = PdfIngestor(
         extractor=DocumentParserRegistry(),
@@ -366,7 +367,7 @@ def test_only_children_are_embedded_and_each_carries_its_parent(stack: SimpleNam
 
 def test_retrieval_returns_the_parent_to_the_model(stack: SimpleNamespace):
     stack.service.ingest_pdf_bytes("alpha.md", _policy("HKD 500"))
-    result = stack.service.query_and_chat("alpha limit rule", pipeline_options=PipelineOptions())
+    result = stack.service.query_and_chat("alpha limit rule", pipeline_options=PipelineOptions(), tenant="default")
     chunk = result["authorized_chunks"][0]
     assert len(chunk["content"]) > len(chunk["matched_children"][0])
     assert "parent_content" not in chunk
@@ -375,9 +376,9 @@ def test_retrieval_returns_the_parent_to_the_model(stack: SimpleNamespace):
 
 def test_parent_inherits_the_acl_of_its_child(stack: SimpleNamespace):
     stack.service.ingest_pdf_bytes("secret.md", _policy("HKD 900", "gamma"), tags=["finance"])
-    blocked = stack.service.query_and_chat("gamma limit rule", user_roles=[], pipeline_options=PipelineOptions())
+    blocked = stack.service.query_and_chat("gamma limit rule", user_roles=[], pipeline_options=PipelineOptions(), tenant="default")
     assert blocked["authorized_chunks"] == []
-    allowed = stack.service.query_and_chat("gamma limit rule", user_roles=["finance"], pipeline_options=PipelineOptions())
+    allowed = stack.service.query_and_chat("gamma limit rule", user_roles=["finance"], pipeline_options=PipelineOptions(), tenant="default")
     assert "HKD 900" in " ".join(c["content"] for c in allowed["authorized_chunks"])
 
 
@@ -395,7 +396,7 @@ def test_erasure_removes_parents_with_their_children(stack: SimpleNamespace):
 def test_a_new_version_retires_old_parents(stack: SimpleNamespace):
     stack.service.ingest_pdf_bytes("alpha.md", _policy("HKD 500"), source_key="alpha")
     stack.service.ingest_pdf_bytes("alpha.md", _policy("HKD 700"), source_key="alpha")
-    result = stack.service.query_and_chat("alpha limit rule", pipeline_options=PipelineOptions())
+    result = stack.service.query_and_chat("alpha limit rule", pipeline_options=PipelineOptions(), tenant="default")
     blob = " ".join(c["content"] for c in result["authorized_chunks"])
     assert "HKD 700" in blob and "HKD 500" not in blob
 
@@ -405,7 +406,7 @@ def test_lab_documents_load_without_llm_concept_extraction(stack: SimpleNamespac
 
     calls: List[str] = []
     stack.service._ingestor._cross_lingual = SimpleNamespace(  # noqa: SLF001
-        extract_concepts_at_ingestion=lambda filename, full_text: calls.append(filename) or ([], "llm")
+        extract_concepts_at_ingestion=lambda filename, full_text, tenant=None: calls.append(filename) or ([], "llm")
     )
     seeded = seed_lab_documents(stack.service)
     assert len(seeded) > 40 and not calls
@@ -444,7 +445,7 @@ def test_reranker_promotes_the_relevant_chunk_from_deep_in_the_first_stage():
     chunks = [_record(f"history-{i}", f"history of the product part {i}") for i in range(20)]
     chunks.append(_record("answer", "the product price is 400 dollars"))
     reranker = KeywordReranker()
-    result = _pipeline(chunks, reranker).run("product", "product", ["__public__"], top_k=3, options=PipelineOptions(rerank=True, candidates=50))
+    result = _pipeline(chunks, reranker).run("product", "product", ["__public__"], top_k=3, options=PipelineOptions(rerank=True, candidates=50), tenant="default")
     assert result.chunks[0]["chunk_id"] == "answer"
     assert len(reranker.seen) == 21
     assert result.trace["rerank"]["status"] == "applied"
@@ -457,7 +458,7 @@ def test_rerank_scores_are_positive_so_trust_tiers_still_work():
         _record("draft", "price draft", trust_tier="draft_notes"),
         _record("policy", "price policy", trust_tier="official_policy"),
     ]
-    result = _pipeline(chunks, KeywordReranker()).run("price", "price", ["__public__"], top_k=2, options=PipelineOptions(rerank=True))
+    result = _pipeline(chunks, KeywordReranker()).run("price", "price", ["__public__"], top_k=2, options=PipelineOptions(rerank=True), tenant="default")
     assert [c["chunk_id"] for c in result.chunks] == ["policy", "draft"]
     assert all(c["score"] > 0 for c in result.chunks)
 
@@ -470,26 +471,26 @@ def test_reranker_failure_keeps_first_stage_order_and_says_so():
             raise CrossEncoderUnavailable("no model")
 
     chunks = [_record("a", "product a"), _record("b", "product b")]
-    result = _pipeline(chunks, Broken()).run("product", "product", ["__public__"], top_k=2, options=PipelineOptions(rerank=True))
+    result = _pipeline(chunks, Broken()).run("product", "product", ["__public__"], top_k=2, options=PipelineOptions(rerank=True), tenant="default")
     assert len(result.chunks) == 2
     assert result.trace["rerank"] == {"status": "failed", "reason": "no model"}
 
 
 def test_missing_reranker_is_reported_not_silent():
-    result = _pipeline([_record("a", "product")]).run("product", "product", ["__public__"], options=PipelineOptions(rerank=True))
+    result = _pipeline([_record("a", "product")]).run("product", "product", ["__public__"], options=PipelineOptions(rerank=True), tenant="default")
     assert result.trace["rerank"]["status"] == "skipped"
 
 
 def test_reranker_is_not_called_unless_requested():
     reranker = KeywordReranker()
-    _pipeline([_record("a", "product")], reranker).run("product", "product", ["__public__"])
+    _pipeline([_record("a", "product")], reranker).run("product", "product", ["__public__"], tenant="default")
     assert reranker.seen == []
 
 
 def test_acl_is_enforced_before_the_reranker_sees_anything():
     reranker = KeywordReranker()
     chunks = [_record("secret", "secret price", acl_tags=["finance"]), _record("open", "open price")]
-    _pipeline(chunks, reranker).run("price", "price", ["__public__"], options=PipelineOptions(rerank=True))
+    _pipeline(chunks, reranker).run("price", "price", ["__public__"], options=PipelineOptions(rerank=True), tenant="default")
     assert reranker.seen == ["open price"]
 
 
@@ -509,10 +510,10 @@ def test_rewrites_find_what_the_raw_query_cannot():
     llm = ScriptedLlm({"queries": ["authentication timeout"]})
     chunks = [_record("auth", "Authentication Service Timeout Exceptions")]
     pipeline = RetrievalPipeline(_memory_retriever(chunks), _NoVectors(), transformer=LlmQueryTransformer(llm))
-    assert pipeline.run("app crashes", "app crashes", ["__public__"], options=PipelineOptions(fusion="lexical")).chunks == []
+    assert pipeline.run("app crashes", "app crashes", ["__public__"], options=PipelineOptions(fusion="lexical"), tenant="default").chunks == []
     llm = ScriptedLlm({"queries": ["authentication timeout"]})
     pipeline = RetrievalPipeline(_memory_retriever(chunks), _NoVectors(), transformer=LlmQueryTransformer(llm))
-    result = pipeline.run("app crashes", "app crashes", ["__public__"], options=PipelineOptions(fusion="lexical", query_mode="multi"))
+    result = pipeline.run("app crashes", "app crashes", ["__public__"], options=PipelineOptions(fusion="lexical", query_mode="multi"), tenant="default")
     assert [c["chunk_id"] for c in result.chunks] == ["auth"]
     assert [variant["kind"] for variant in result.trace["variants"]] == ["original", "rewrite"]
 
@@ -532,7 +533,7 @@ def test_hyde_text_never_reaches_the_lexical_search():
 
     llm = ScriptedLlm({"passage": "invented wording"})
     RetrievalPipeline(Spy(), ConstantEmbedder(), transformer=LlmQueryTransformer(llm)).run(
-        "q", "q", ["__public__"], options=PipelineOptions(query_mode="hyde")
+        "q", "q", ["__public__"], options=PipelineOptions(query_mode="hyde"), tenant="default"
     )
     assert ("invented wording", "dense") in searched
 
@@ -547,7 +548,7 @@ def test_every_variant_uses_the_callers_acl_tags():
 
     llm = ScriptedLlm({"queries": ["a", "b"]}, {"passage": "c"})
     RetrievalPipeline(Spy(), ConstantEmbedder(), transformer=LlmQueryTransformer(llm)).run(
-        "q", "q", ["__public__", "finance"], options=PipelineOptions(query_mode="both")
+        "q", "q", ["__public__", "finance"], options=PipelineOptions(query_mode="both"), tenant="default"
     )
     assert len(tags) == 4 and all(value == ["__public__", "finance"] for value in tags)
 
@@ -635,6 +636,7 @@ def test_restricted_second_hop_is_masked_and_cannot_leak(stack: SimpleNamespace)
         "How did the Q3 launch affect European revenue?",
         user_roles=[],
         pipeline_options=PipelineOptions(multi_hop=True),
+        tenant="default",
     )
     blob = " ".join(c["content"] for c in result["authorized_chunks"]) + result["answer"]
     assert "4,200,000" not in blob
@@ -653,6 +655,7 @@ def test_multi_hop_chunks_reach_the_answer_with_the_right_acl(stack: SimpleNames
         "How did the Q3 launch affect European revenue?",
         user_roles=["finance"],
         pipeline_options=PipelineOptions(multi_hop=True),
+        tenant="default",
     )
     assert {"launch.md", "revenue.md"} <= {c["filename"] for c in result["authorized_chunks"]}
 
@@ -697,13 +700,13 @@ def test_live_exact_code_beats_a_document_with_the_same_parts(live_index: Any):
         _record("parts", "ACME sells X200 cables and many ACME adapters for the X200 line", is_current=True, ingestion_status="INDEXED"),
         _record("whole", "ACME-X200 weighs four kilograms", is_current=True, ingestion_status="INDEXED"),
     )
-    outcome = HybridRetriever(live_index).search("ACME-X200", [0.5, 0.5, 0.5, 0.5], ["__public__"], top_k=2, fusion="lexical")
+    outcome = HybridRetriever(live_index).search("ACME-X200", [0.5, 0.5, 0.5, 0.5], ["__public__"], top_k=2, fusion="lexical", tenant="default")
     assert outcome.authorized_chunks[0]["chunk_id"] == "whole"
 
 
 def test_live_rrf_returns_rankings_from_both_searches(live_index: Any):
     _index(live_index, _record("a", "ERR-1042 token expired"), _record("b", "general manual"))
-    outcome = HybridRetriever(live_index).search("ERR-1042", [0.5, 0.5, 0.5, 0.5], ["__public__"], top_k=2)
+    outcome = HybridRetriever(live_index).search("ERR-1042", [0.5, 0.5, 0.5, 0.5], ["__public__"], top_k=2, tenant="default")
     assert outcome.rankings["lexical"] == ["a"]
     assert set(outcome.rankings["dense"]) == {"a", "b"}
     assert outcome.authorized_chunks[0]["chunk_id"] == "a"
@@ -711,7 +714,7 @@ def test_live_rrf_returns_rankings_from_both_searches(live_index: Any):
 
 def test_live_acl_applies_to_both_searches_in_rrf(live_index: Any):
     _index(live_index, _record("secret", "ERR-1042 secret", acl_tags=["finance"]), _record("open", "ERR-1042 open"))
-    outcome = HybridRetriever(live_index).search("ERR-1042", [0.5, 0.5, 0.5, 0.5], ["__public__"], top_k=5)
+    outcome = HybridRetriever(live_index).search("ERR-1042", [0.5, 0.5, 0.5, 0.5], ["__public__"], top_k=5, tenant="default")
     assert [c["chunk_id"] for c in outcome.authorized_chunks] == ["open"]
     assert "secret" not in outcome.rankings["lexical"] + outcome.rankings["dense"]
 

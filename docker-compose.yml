@@ -44,6 +44,13 @@ services:
       - RAG_VERIFY_WITH_LLM=${RAG_VERIFY_WITH_LLM:-true}
       - RAG_TRUST_MODE=${RAG_TRUST_MODE:-annotate}
       - RAG_MIN_RELEVANCE=${RAG_MIN_RELEVANCE:-}
+      - RAG_AUTH_MODE=${RAG_AUTH_MODE:-demo}
+      - RAG_AUTH_SECRET=${RAG_AUTH_SECRET:-}
+      - RAG_WRITE_ROLES=${RAG_WRITE_ROLES:-admin}
+      - RAG_CORS_ORIGINS=${RAG_CORS_ORIGINS:-}
+      - RAG_TENANT_MODE=${RAG_TENANT_MODE:-shared}
+      - RAG_INDEX_PREFIX=${RAG_INDEX_PREFIX:-hk-rbac-rag-kb}
+      - RAG_DEFAULT_TENANT=${RAG_DEFAULT_TENANT:-default}
       - FASTEMBED_CACHE_PATH=/app/workspace/.fastembed
     extra_hosts:
       - "host.docker.internal:host-gateway"

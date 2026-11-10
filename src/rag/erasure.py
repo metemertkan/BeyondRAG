@@ -18,6 +18,10 @@ The tombstone goes first and survives the purge, so a nightly re-sync cannot qui
 resurrect the data. The audit log stores only keyed hashes, because a deletion record
 must not itself retain the identifier that was deleted.
 
+A request runs inside one tenant. A subject id or a source key is only unique within a
+tenant, so the plan carries the tenant and every store is asked about that tenant alone.
+One company's erasure never touches, counts or blocks another company's data.
+
 Out of scope, and stated on every receipt: ES snapshots and other backups, which need
 their own retention window, and copies outside this system.
 """
@@ -38,6 +42,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from src.rag.governance import normalize_subject_id
+from src.rag.tenancy import DEFAULT_TENANT, normalize_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +68,11 @@ class ErasurePlan:
     chunk_count: int
     table_ids: List[str]
     residual_mentions: int = 0
+    tenant: str = DEFAULT_TENANT
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "tenant": self.tenant,
             "subject_id": self.subject_id,
             "source_keys": self.source_keys,
             "match_type": self.match_type,
@@ -90,10 +97,12 @@ class ErasureReceipt:
     # Deleted documents still physically in Lucene segments when this receipt was written.
     soft_deleted_pending: int = 0
     notice: str = BACKUP_NOTICE
+    tenant: str = DEFAULT_TENANT
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "request_id": self.request_id,
+            "tenant": self.tenant,
             "completed_at": self.completed_at,
             "subject_hash": self.subject_hash,
             "source_hashes": self.source_hashes,
@@ -136,25 +145,28 @@ class ErasureService:
     def _hash(self, value: str) -> str:
         return self._repository.keyed_hash(value)
 
-    def plan_subject(self, subject_id: str, *, include_detected: bool = True) -> ErasurePlan:
-        """Find every source linked to a person, via declared and detected lineage."""
+    def plan_subject(
+        self, subject_id: str, *, include_detected: bool = True, tenant: str | None = None
+    ) -> ErasurePlan:
+        """Find every source linked to a person in one tenant, via declared and detected lineage."""
         subject = normalize_subject_id(subject_id)
         if not subject:
             raise ValueError("subject_id must not be empty")
-        declared, detected = self._repository.find_sources_by_subject(subject)
+        scope = normalize_tenant(tenant)
+        declared, detected = self._repository.find_sources_by_subject(subject, tenant=scope)
         match_type = {key: "declared" for key in declared}
         if include_detected:
             match_type.update({key: "detected" for key in detected if key not in match_type})
-        plan = self._build_plan(subject, match_type)
+        plan = self._build_plan(subject, match_type, scope)
         plan.residual_mentions = self._repository.count_subject_mentions(
-            subject, exclude_source_keys=plan.source_keys
+            subject, exclude_source_keys=plan.source_keys, tenant=scope
         )
         return plan
 
-    def plan_source(self, source_key: str) -> ErasurePlan:
-        return self._build_plan(None, {source_key: "source_request"})
+    def plan_source(self, source_key: str, *, tenant: str | None = None) -> ErasurePlan:
+        return self._build_plan(None, {source_key: "source_request"}, normalize_tenant(tenant))
 
-    def _build_plan(self, subject: Optional[str], match_type: Dict[str, str]) -> ErasurePlan:
+    def _build_plan(self, subject: Optional[str], match_type: Dict[str, str], tenant: str) -> ErasurePlan:
         source_keys = sorted(match_type)
         versions = [
             {
@@ -164,19 +176,20 @@ class ErasureService:
                 "doc_version": report.doc_version,
                 "status": report.status.value,
             }
-            for report in self._repository.versions_for_sources(source_keys)
+            for report in self._repository.versions_for_sources(source_keys, tenant=tenant)
         ]
         return ErasurePlan(
             subject_id=subject,
             source_keys=source_keys,
             match_type=match_type,
             versions=versions,
-            chunk_count=self._repository.count_chunks(source_keys=source_keys, subject_id=subject),
+            chunk_count=self._repository.count_chunks(source_keys=source_keys, subject_id=subject, tenant=tenant),
             table_ids=[
                 table_id
                 for key in source_keys
-                for table_id in self._repository.tabular_store.table_ids_for(source_key=key)
+                for table_id in self._repository.tabular_store.table_ids_for(source_key=key, tenant=tenant)
             ],
+            tenant=tenant,
         )
 
     def execute(self, plan: ErasurePlan, *, request_id: Optional[str] = None) -> ErasureReceipt:
@@ -187,25 +200,33 @@ class ErasureService:
         """
         request_id = request_id or f"erasure-{uuid.uuid4().hex[:12]}"
         repository = self._repository
-        versions = repository.versions_for_sources(plan.source_keys)
+        tenant = normalize_tenant(plan.tenant)
+        versions = repository.versions_for_sources(plan.source_keys, tenant=tenant)
 
         repository.add_tombstones(
             request_id=request_id,
             source_keys=plan.source_keys,
             content_hashes=[report.content_hash for report in versions if report.content_hash],
             subject_id=plan.subject_id,
+            tenant=tenant,
         )
 
         removed = {
-            "chunks": repository.delete_chunks_by_lineage(source_keys=plan.source_keys, subject_id=plan.subject_id),
+            "chunks": repository.delete_chunks_by_lineage(
+                source_keys=plan.source_keys, subject_id=plan.subject_id, tenant=tenant
+            ),
             "versions": len(versions),
             "upload_files": sum(repository.delete_upload_file_count(report.doc_id) for report in versions),
-            "tables": sum(repository.tabular_store.delete_tables(source_key=key) for key in plan.source_keys),
+            "tables": sum(
+                repository.tabular_store.delete_tables(source_key=key, tenant=tenant) for key in plan.source_keys
+            ),
         }
         concept_ids = [concept for report in versions for concept in report.dynamic_concepts]
-        removed["concepts"] = self._concepts.forget(concept_ids, subject_id=plan.subject_id) if self._concepts else 0
-        repository.forget_registry_entries(plan.source_keys)
-        soft_deleted_pending = repository.expunge_deleted_documents()
+        removed["concepts"] = (
+            self._concepts.forget(concept_ids, subject_id=plan.subject_id, tenant=tenant) if self._concepts else 0
+        )
+        repository.forget_registry_entries(plan.source_keys, tenant=tenant)
+        soft_deleted_pending = repository.expunge_deleted_documents(tenant=tenant)
 
         residuals = self.verify(plan, doc_ids=[report.doc_id for report in versions])
         receipt = ErasureReceipt(
@@ -217,6 +238,7 @@ class ErasureService:
             verified=not any(residuals.values()),
             residuals=residuals,
             soft_deleted_pending=soft_deleted_pending,
+            tenant=tenant,
         )
         self._append_audit_log(receipt)
         return receipt
@@ -227,6 +249,7 @@ class ErasureService:
         *,
         max_wait_seconds: float = 120.0,
         poll_seconds: float = 10.0,
+        tenant: str | None = None,
     ) -> int:
         """Retry the merge until deleted text has left the segments, then audit the result.
 
@@ -235,13 +258,14 @@ class ErasureService:
         success. Run this after responding, since it can take a minute or more.
         """
         deadline = time.monotonic() + max_wait_seconds
-        remaining = self._repository.expunge_deleted_documents()
+        remaining = self._repository.expunge_deleted_documents(tenant=tenant)
         while remaining and time.monotonic() < deadline:
             time.sleep(poll_seconds)
-            remaining = self._repository.expunge_deleted_documents()
+            remaining = self._repository.expunge_deleted_documents(tenant=tenant)
         self._append_audit_record(
             {
                 "request_id": request_id,
+                "tenant": normalize_tenant(tenant),
                 "event": "physical_purge_check",
                 "checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "soft_deleted_remaining": remaining,
@@ -252,19 +276,26 @@ class ErasureService:
     def verify(self, plan: ErasurePlan, *, doc_ids: Sequence[str]) -> Dict[str, int]:
         """Re-scan every store. Any non-zero count means the data is still somewhere."""
         repository = self._repository
+        tenant = normalize_tenant(plan.tenant)
         residuals = {
-            "chunks_by_lineage": repository.count_chunks(source_keys=plan.source_keys, subject_id=plan.subject_id),
+            "chunks_by_lineage": repository.count_chunks(
+                source_keys=plan.source_keys, subject_id=plan.subject_id, tenant=tenant
+            ),
             "upload_files": sum(repository.count_upload_files(doc_id) for doc_id in doc_ids),
-            "registry_entries": len(repository.versions_for_sources(plan.source_keys)),
-            "tables": sum(len(repository.tabular_store.table_ids_for(source_key=key)) for key in plan.source_keys),
+            "registry_entries": len(repository.versions_for_sources(plan.source_keys, tenant=tenant)),
+            "tables": sum(
+                len(repository.tabular_store.table_ids_for(source_key=key, tenant=tenant)) for key in plan.source_keys
+            ),
         }
         if plan.subject_id:
             # Full-text scan catches mentions that lineage metadata never tagged.
-            residuals["chunk_text_mentions"] = repository.count_subject_mentions(plan.subject_id)
-            residuals["concept_mentions"] = self._concepts.count_mentions(plan.subject_id) if self._concepts else 0
+            residuals["chunk_text_mentions"] = repository.count_subject_mentions(plan.subject_id, tenant=tenant)
+            residuals["concept_mentions"] = (
+                self._concepts.count_mentions(plan.subject_id, tenant=tenant) if self._concepts else 0
+            )
             # A document kept with include_detected=False still holds the person's data in its
             # raw file, so this counts as incomplete until someone redacts or removes it.
-            declared, detected = repository.find_sources_by_subject(plan.subject_id)
+            declared, detected = repository.find_sources_by_subject(plan.subject_id, tenant=tenant)
             residuals["sources_still_linked"] = len(set(declared) | set(detected))
         return residuals
 
@@ -286,6 +317,9 @@ class SourceSyncHandler:
     a hard erasure of the source; ``archived`` keeps the data but removes it from
     retrieval. Events for an unknown source are acknowledged, since the source may
     simply never have been ingested.
+
+    An event belongs to one tenant's source system. Event ids and source keys are scoped
+    to that tenant, so one tenant's webhook cannot erase or archive another's document.
     """
 
     SUPPORTED = ("deleted", "archived")
@@ -294,19 +328,22 @@ class SourceSyncHandler:
         self._repository = repository
         self._erasure = erasure
 
-    def handle(self, *, event_id: str, event_type: str, source_key: str) -> Dict[str, Any]:
+    def handle(self, *, event_id: str, event_type: str, source_key: str, tenant: str | None = None) -> Dict[str, Any]:
         if event_type not in self.SUPPORTED:
             raise ValueError(f"Unsupported event_type {event_type!r}. Supported: {list(self.SUPPORTED)}")
-        if self._repository.has_processed_event(event_id):
+        scope = normalize_tenant(tenant)
+        if self._repository.has_processed_event(event_id, tenant=scope):
             return {"event_id": event_id, "status": "duplicate_ignored"}
 
         if event_type == "deleted":
-            receipt = self._erasure.execute(self._erasure.plan_source(source_key), request_id=f"sync-{event_id}")
+            receipt = self._erasure.execute(
+                self._erasure.plan_source(source_key, tenant=scope), request_id=f"sync-{event_id}"
+            )
             result: Dict[str, Any] = {"status": "erased", "receipt": receipt.to_dict()}
         else:
-            result = {"status": "archived", "versions": self._repository.archive_source(source_key)}
+            result = {"status": "archived", "versions": self._repository.archive_source(source_key, tenant=scope)}
 
-        self._repository.record_processed_event(event_id)
+        self._repository.record_processed_event(event_id, tenant=scope)
         return {"event_id": event_id, **result}
 
 

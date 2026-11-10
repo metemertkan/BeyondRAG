@@ -226,7 +226,7 @@ class _Stack:
         self.retriever = HybridRetriever(self.es)
 
     def search(self, query: str, roles: List[str], top_k: int = 4) -> List[Dict[str, Any]]:
-        return self.retriever.search(query, self.embedder.embed(query), roles, top_k=top_k).authorized_chunks
+        return self.retriever.search(query, self.embedder.embed(query), roles, top_k=top_k, tenant="default").authorized_chunks
 
     def close(self) -> None:
         if self.es.is_online():
