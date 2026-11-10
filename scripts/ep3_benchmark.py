@@ -301,7 +301,7 @@ def run_fusion(args: argparse.Namespace) -> Dict[str, Any]:
         def first_stage(mode: str, profile: str) -> Callable[[str], List[str]]:
             def search(text: str) -> List[str]:
                 vector = embedder.embed(text) if mode != "lexical" else None
-                outcome = retriever.search(text, vector, ACL, top_k=100, candidate_k=100, fusion=mode, profile_name=profile)
+                outcome = retriever.search(text, vector, ACL, top_k=100, candidate_k=100, fusion=mode, profile_name=profile, tenant="default")
                 return [chunk["chunk_id"] for chunk in outcome.authorized_chunks]
 
             return search
@@ -373,7 +373,7 @@ def _exact_on(corpus: Dict[str, Any]) -> Dict[str, Any]:
         def mode_search(mode: str) -> Callable[[str], List[str]]:
             def search(text: str) -> List[str]:
                 vector = embedder.embed(text) if mode != "lexical" else None
-                outcome = retriever.search(text, vector, ACL, top_k=10, candidate_k=10, fusion=mode)
+                outcome = retriever.search(text, vector, ACL, top_k=10, candidate_k=10, fusion=mode, tenant="default")
                 return [chunk["chunk_id"] for chunk in outcome.authorized_chunks]
 
             return search
@@ -478,7 +478,7 @@ def _parent_child_on(corpus: Dict[str, Any], child_tokens: int) -> Dict[str, Any
             retriever = HybridRetriever(index.manager)
             rows, context_sizes = [], []
             for query in corpus["queries"]:
-                outcome = retriever.search(query["query"], embedder.embed(query["query"]), ACL, top_k=30, candidate_k=30, fusion="dense")
+                outcome = retriever.search(query["query"], embedder.embed(query["query"]), ACL, top_k=30, candidate_k=30, fusion="dense", tenant="default")
                 chunks, _ = expand_to_parents(outcome.authorized_chunks)
                 top = chunks[:3]
                 context = " ".join(chunk["content"] for chunk in top)

@@ -35,6 +35,7 @@ from src.rag.repository import DocumentRepository
 from src.rag.retriever import HybridRetriever
 from src.rag.service import RBACKnowledgeBaseService
 from src.rag.synthesizer import GroundedAnswerSynthesizer
+from src.rag.tenancy import DEFAULT_TENANT
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATASET = REPO_ROOT / "eval" / "golden_dataset.json"
@@ -78,10 +79,14 @@ class NoopCrossLingual:
     def is_cross_lingual(self, text: str) -> bool:
         return False
 
-    def extract_concepts_at_ingestion(self, filename: str, full_text: str) -> Tuple[List[Dict[str, Any]], str]:
+    def extract_concepts_at_ingestion(
+        self, filename: str, full_text: str, tenant: str | None = None
+    ) -> Tuple[List[Dict[str, Any]], str]:
         return [], "none"
 
-    def prepare_query(self, question: str, allow_llm_fallback: bool = False) -> Tuple[str, List[str]]:
+    def prepare_query(
+        self, question: str, allow_llm_fallback: bool = False, tenant: str | None = None
+    ) -> Tuple[str, List[str]]:
         return question, []
 
 
@@ -206,6 +211,7 @@ def evaluate_case(case: Dict[str, Any], pipeline: EvalPipeline, judge: Judge, *,
         user_roles=case.get("roles", []),
         top_k=top_k,
         synthesis_mode="llm",
+        tenant=DEFAULT_TENANT,
     )
     contexts = [chunk["content"] for chunk in response["authorized_chunks"]]
     result.answer = response["answer"]

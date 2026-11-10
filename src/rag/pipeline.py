@@ -1,7 +1,8 @@
 """The retrieval pipeline: transform, search, fuse, re-rank, expand to parents.
 
 Each stage is optional and records what it did, so an answer can show how it was retrieved.
-The caller's ACL tags go into every search. Nothing downstream can widen them.
+The caller's tenant and ACL tags go into every search. Nothing downstream can widen them:
+query rewriting, multi-query fusion and re-ranking only ever see chunks from that one tenant.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from src.rag.governance import apply_trust_ranking
 from src.rag.parent_child import expand_to_parents
 from src.rag.ports import EmbedderPort, HybridRetrieverPort, RerankerPort
 from src.rag.query_transform import LlmQueryTransformer, QueryPlan, QueryVariant
+from src.rag.tenancy import require_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +97,7 @@ class RetrievalPipeline:
         profile_name: Optional[str],
         options: PipelineOptions,
         candidate_k: int,
+        tenant: str,
     ) -> Any:
         fusion = options.fusion
         if not variant.lexical:
@@ -108,6 +111,7 @@ class RetrievalPipeline:
             profile_name=profile_name,
             fusion=fusion,
             candidate_k=candidate_k,
+            tenant=tenant,
         )
 
     def _rerank(self, question: str, chunks: List[Dict[str, Any]], trace: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -155,7 +159,10 @@ class RetrievalPipeline:
         top_k: int = 4,
         profile_name: Optional[str] = None,
         options: Optional[PipelineOptions] = None,
+        *,
+        tenant: str,
     ) -> PipelineResult:
+        tenant = require_tenant(tenant)
         options = options or PipelineOptions()
         started = time.perf_counter()
         trace: Dict[str, Any] = {"options": asdict(options)}
@@ -168,7 +175,7 @@ class RetrievalPipeline:
         # Without a second stage, keep three times top_k so trust ranking and parent merging have room.
         candidate_k = options.candidates if broad else top_k * 3
         outcomes = [
-            self._search_variant(variant, acl_tags, top_k, profile_name, options, candidate_k)
+            self._search_variant(variant, acl_tags, top_k, profile_name, options, candidate_k, tenant)
             for variant in plan.variants
         ]
         first = outcomes[0]

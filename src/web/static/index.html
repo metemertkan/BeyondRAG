@@ -392,17 +392,26 @@
         <div class="brand-mark" aria-hidden="true">BR</div>
         <div>
           <div class="brand-title">BeyondRAG</div>
-          <p class="brand-sub">Enterprise RBAC &amp; Cross-Lingual Knowledge Base</p>
+          <p class="brand-sub">Multi-Tenant RBAC &amp; Cross-Lingual Knowledge Base</p>
         </div>
       </div>
 
       <div class="header-actions">
-        <div class="role-bar">
+        <div class="role-bar" id="tenantBar">
+          <span class="role-label">Tenant</span>
+          <select id="tenantSelect" class="select-input" onchange="setTenant(this.value)" aria-label="Tenant"></select>
+        </div>
+        <div class="role-bar" id="roleBar">
           <span class="role-label">Role</span>
           <button type="button" onclick="setRolePreset([])" id="presetPublicBtn" class="btn">Public Only</button>
           <button type="button" onclick="setRolePreset(['finance'])" id="presetFinanceBtn" class="btn">Finance Role</button>
           <button type="button" onclick="setRolePreset(['operation'])" id="presetOperationBtn" class="btn">Operation Role</button>
           <button type="button" onclick="setRolePreset(['finance', 'operation'])" id="presetAllBtn" class="btn">All Roles</button>
+          <button type="button" onclick="setRolePreset(['admin'])" id="presetAdminBtn" class="btn" title="Admins can upload, retag and delete">Admin</button>
+        </div>
+        <div class="role-bar" id="tokenBar" style="display:none">
+          <span class="role-label">Token</span>
+          <input id="tokenInput" type="password" class="text-input mono" style="width:220px" placeholder="Paste a bearer token" onchange="useSuppliedToken(this.value)" />
         </div>
         <button type="button" id="themeToggleBtn" class="btn btn-theme" onclick="toggleTheme()" aria-label="Toggle theme">Dark</button>
       </div>
@@ -510,6 +519,104 @@
     let documents = [];
     let selectedPdfFile = null;
 
+    // Identity. The server reads the tenant and roles from the signed token, so these
+    // variables only decide what the page shows. Changing them here changes nothing
+    // about what the API returns.
+    let authMode = 'demo';
+    let authToken = '';
+    let activeTenant = '';
+    let expandedRoles = new Set();
+    let canWrite = false;
+
+    async function loadAuthConfig() {
+      const resp = await fetch('/api/auth/config');
+      const cfg = await resp.json();
+      authMode = cfg.mode;
+      const demo = authMode === 'demo';
+      document.getElementById('tenantBar').style.display = demo ? '' : 'none';
+      document.getElementById('roleBar').style.display = demo ? '' : 'none';
+      document.getElementById('tokenBar').style.display = demo ? 'none' : '';
+      if (!demo) return;
+      const select = document.getElementById('tenantSelect');
+      select.innerHTML = (cfg.tenants || []).map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+      let saved = '';
+      try { saved = localStorage.getItem('br-tenant') || ''; } catch (_) {}
+      activeTenant = (cfg.tenants || []).includes(saved) ? saved : (cfg.tenants || [])[0] || '';
+      select.value = activeTenant;
+    }
+
+    // Demo mode: ask the server to sign a token for the chosen persona.
+    async function refreshIdentity() {
+      if (authMode !== 'demo') return;
+      const resp = await fetch('/api/auth/demo-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant: activeTenant, roles: Array.from(activeUserRoles) }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || 'Could not get a demo token');
+      authToken = data.token;
+      expandedRoles = new Set(data.expanded_roles || []);
+      canWrite = !!data.can_write;
+    }
+
+    // Required mode: the token comes from your identity provider. Read its claims for display only.
+    async function useSuppliedToken(token) {
+      authToken = (token || '').trim();
+      try {
+        const claims = JSON.parse(atob(authToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        activeTenant = String(claims.tenant || '');
+        activeUserRoles = new Set(claims.roles || []);
+        expandedRoles = new Set(claims.roles || []);
+        canWrite = true;  // Unknown here; the server decides and answers 403 if not.
+      } catch (_) {
+        activeTenant = '';
+      }
+      await afterIdentityChange();
+    }
+
+    async function apiFetch(url, options = {}, retry = true) {
+      const headers = Object.assign({}, options.headers || {}, { Authorization: `Bearer ${authToken}` });
+      const resp = await fetch(url, Object.assign({}, options, { headers }));
+      if (resp.status === 401 && retry && authMode === 'demo') {
+        await refreshIdentity();  // The demo token expired.
+        return apiFetch(url, options, false);
+      }
+      return resp;
+    }
+
+    function noteInChat(text) {
+      const box = document.getElementById('chatMessages');
+      box.insertAdjacentHTML('beforeend', `<div class="trace-note" style="text-align:center;margin:8px 0">${escapeHtml(text)}</div>`);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    async function afterIdentityChange() {
+      renderUserRoleControls();
+      updateWriteControls();
+      await fetchDocumentsAndTags();
+    }
+
+    async function setTenant(tenant) {
+      activeTenant = tenant;
+      try { localStorage.setItem('br-tenant', tenant); } catch (_) {}
+      await refreshIdentity();
+      noteInChat(`Now signed in to tenant "${tenant}". Same roles, different company.`);
+      await afterIdentityChange();
+    }
+
+    function updateWriteControls() {
+      const btn = document.getElementById('uploadSubmitBtn');
+      const seed = document.getElementById('labSeedBtn');
+      btn.disabled = !canWrite;
+      seed.disabled = !canWrite;
+      const hint = canWrite ? '' : 'Uploading needs the Admin role in this tenant.';
+      btn.title = hint;
+      seed.title = hint;
+      if (!canWrite) document.getElementById('uploadStatusMsg').textContent = hint;
+      else if (document.getElementById('uploadStatusMsg').textContent.startsWith('Uploading needs')) document.getElementById('uploadStatusMsg').textContent = '';
+    }
+
     function applyTheme(theme) {
       const root = document.documentElement;
       if (theme === 'dark') root.setAttribute('data-theme', 'dark');
@@ -534,8 +641,14 @@
       await loadUiDemoConfig();
       renderUploadTagPills();
       updateUploadAccessPreview();
-      await fetchDocumentsAndTags();
-      renderUserRoleControls();
+      await loadAuthConfig();
+      if (authMode === 'demo') {
+        await refreshIdentity();
+        await afterIdentityChange();
+      } else {
+        renderUserRoleControls();
+        updateWriteControls();
+      }
     });
 
     function handleFileSelect(event) {
@@ -581,10 +694,10 @@
       }
     }
 
-    function setRolePreset(rolesArray) {
+    async function setRolePreset(rolesArray) {
       activeUserRoles = new Set(rolesArray);
-      renderUserRoleControls();
-      renderDocumentsList();
+      await refreshIdentity();
+      await afterIdentityChange();
     }
 
     function renderUserRoleControls() {
@@ -602,17 +715,18 @@
       setBtnStyle('presetFinanceBtn', isFinOnly);
       setBtnStyle('presetOperationBtn', isOpOnly);
       setBtnStyle('presetAllBtn', isBoth);
+      setBtnStyle('presetAdminBtn', roles.length === 1 && roles[0] === 'admin');
 
       const banner = document.getElementById('chatRoleBanner');
-      banner.textContent = roles.length === 0
-        ? 'Active: Public Only'
-        : `Active: ${roles.join(' + ')}`;
+      const who = roles.length === 0 ? 'Public Only' : roles.join(' + ');
+      banner.textContent = activeTenant ? `${activeTenant} · ${who}` : 'Not signed in';
     }
 
     async function fetchDocumentsAndTags() {
-      const resp = await fetch('/api/documents');
+      if (!authToken) { documents = []; renderDocumentsList(); return; }
+      const resp = await apiFetch('/api/documents');
       const data = await resp.json();
-      documents = data.documents || [];
+      documents = resp.ok ? (data.documents || []) : [];
       renderUploadTagPills();
       renderUserRoleControls();
       renderDocumentsList();
@@ -631,7 +745,7 @@
         formData.append('tags', Array.from(selectedUploadTags).join(','));
         const sourceKey = (document.getElementById('sourceKeyInput').value || '').trim();
         if (sourceKey) formData.append('source_key', sourceKey);
-        const resp = await fetch('/api/upload', { method: 'POST', body: formData });
+        const resp = await apiFetch('/api/upload', { method: 'POST', body: formData });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.detail || 'Upload failed');
         const st = escapeHtml(data.document.status || 'INDEXED');
@@ -644,13 +758,14 @@
       } catch (err) {
         statusEl.innerHTML = `<span class="status-err">${escapeHtml(err.message)}</span>`;
       } finally {
-        btn.disabled = false;
+        btn.disabled = !canWrite;
       }
     }
 
     function canCurrentUserAccessDoc(doc) {
       if (doc.is_public || !doc.tags || doc.tags.length === 0) return true;
-      return doc.tags.some(t => activeUserRoles.has(t));
+      // Roles as the server expanded them (admin includes finance and operation).
+      return doc.tags.some(t => expandedRoles.has(t));
     }
 
     function lifecycleBadge(status) {
@@ -752,9 +867,9 @@
       const messagesContainer = document.getElementById('chatMessages');
       const sendBtn = document.getElementById('chatSendBtn');
 
-      const roleBadge = roles.length
+      const roleBadge = `<span class="label">${escapeHtml(activeTenant || 'no tenant')}</span> ` + (roles.length
         ? roles.map(r => `<span class="label label-ink">${escapeHtml(r)}</span>`).join(' ')
-        : `<span class="label label-fix">public</span>`;
+        : `<span class="label label-fix">public</span>`);
 
       messagesContainer.insertAdjacentHTML('beforeend', `
         <div class="msg-user">
@@ -770,12 +885,12 @@
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
       try {
-        const resp = await fetch('/api/chat', {
+        // No tenant and no roles in the body: the server takes both from the token.
+        const resp = await apiFetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             question,
-            user_roles: roles,
             top_k: 4,
             synthesis_mode: synthesisMode,
             fusion: document.getElementById('labFusion').value,
@@ -787,7 +902,10 @@
           })
         });
         const data = await resp.json();
-        appendAssistantResponse(data);
+        if (resp.ok) appendAssistantResponse(data);
+        else noteInChat(`Request refused (${resp.status}): ${data.detail || 'no detail'}`);
+      } catch (err) {
+        noteInChat(`Request failed: ${err.message}`);
       } finally {
         sendBtn.disabled = false;
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -930,14 +1048,14 @@
       button.disabled = true;
       button.textContent = 'Loading...';
       try {
-        const resp = await fetch('/api/seed-lab', { method: 'POST' });
+        const resp = await apiFetch('/api/seed-lab', { method: 'POST' });
         const data = await resp.json();
-        button.textContent = resp.ok ? `Loaded ${data.seeded} documents` : 'Loading failed';
+        button.textContent = resp.ok ? `Loaded ${data.seeded} documents` : (resp.status === 403 ? 'Needs the Admin role' : 'Loading failed');
         await fetchDocumentsAndTags();
       } catch (_) {
         button.textContent = 'Loading failed';
       } finally {
-        button.disabled = false;
+        button.disabled = !canWrite;
       }
     }
 

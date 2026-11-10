@@ -15,6 +15,7 @@ from elasticsearch import Elasticsearch
 from src.config import ELASTICSEARCH_URL
 from src.rag.embeddings import EMBEDDING_DIMS
 from src.rag.profiles import DEFAULT_INDEX_PREFIX, IndexTenantStrategy
+from src.rag.tenancy import DEFAULT_TENANT, normalize_tenant
 
 KB_INDEX_NAME: Final[str] = DEFAULT_INDEX_PREFIX
 VECTOR_INDEX_TYPES: Final[tuple[str, ...]] = ("int8_hnsw", "int4_hnsw", "hnsw")
@@ -60,7 +61,12 @@ class ElasticsearchIndexManager:
         self.vector_index_type = vector_index_type
         self._es_url = es_url
         self.tenant_strategy = tenant_strategy or IndexTenantStrategy()
-        self.index_name = index_name or self.tenant_strategy.resolve_index_name()
+        # "shared" (pool): one index, every query filtered by tenant.
+        # "per_tenant" (silo): one index per tenant, and the same filter as a second barrier.
+        self.per_tenant = self.tenant_strategy.tenant_mode == "per_tenant"
+        self.base_index_name = index_name or self.tenant_strategy.prefix
+        # Kept for callers that predate tenants: the default tenant's index.
+        self.index_name = self.index_for(self.tenant_strategy.default_tenant or DEFAULT_TENANT)
         self.dimensions = dimensions
         self.client = Elasticsearch(self._es_url, request_timeout=5, max_retries=1)
         self.memory_chunks: List[Dict[str, Any]] = []
@@ -77,13 +83,49 @@ class ElasticsearchIndexManager:
         except Exception:
             return False
 
-    def ensure_index(self) -> None:
-        """Create the RBAC hybrid search index (`int8_hnsw` + slowlog) if it does not exist."""
+    def index_for(self, tenant: str | None) -> str:
+        """The one index a tenant's data lives in. Always a concrete name, never a pattern."""
+        if not self.per_tenant:
+            return self.base_index_name
+        return f"{self.base_index_name}-{normalize_tenant(tenant)}"
+
+    def tenant_indices(self) -> List[str]:
+        """Every index this manager owns. For operator tasks only, never for a search.
+
+        In silo mode the name pattern alone is not trusted: an index counts only if this
+        code created it for the same base name (recorded in the mapping's ``_meta``).
+        """
         if not self.is_online():
-            return
-        if not self.client.indices.exists(index=self.index_name):
+            return []
+        if not self.per_tenant:
+            return [self.base_index_name] if self.client.indices.exists(index=self.base_index_name) else []
+        found = self.client.indices.get(index=f"{self.base_index_name}-*", allow_no_indices=True)
+        return sorted(
+            name
+            for name, body in found.items()
+            if (body.get("mappings", {}).get("_meta") or {}).get("base_index") == self.base_index_name
+        )
+
+    def drop_tenant_index(self, tenant: str) -> bool:
+        """Silo offboarding: remove a tenant's whole index. Refused in the pool, where it is shared."""
+        if not self.per_tenant:
+            raise ValueError("drop_tenant_index needs RAG_TENANT_MODE=per_tenant. The shared index holds every tenant.")
+        scope = normalize_tenant(tenant)
+        self.memory_chunks = [c for c in self.memory_chunks if normalize_tenant(c.get("tenant")) != scope]
+        name = self.index_for(scope)
+        if self.is_online() and self.client.indices.exists(index=name):
+            self.client.indices.delete(index=name)
+            return True
+        return False
+
+    def ensure_index(self, tenant: str | None = None) -> str:
+        """Create the tenant's hybrid search index (`int8_hnsw` + slowlog) if missing. Returns its name."""
+        index_name = self.index_for(tenant)
+        if not self.is_online():
+            return index_name
+        if not self.client.indices.exists(index=index_name):
             self.client.indices.create(
-                index=self.index_name,
+                index=index_name,
                 settings={
                     "index.search.slowlog.threshold.query.warn": "0ms",
                     "index.search.slowlog.threshold.fetch.warn": "0ms",
@@ -110,6 +152,10 @@ class ElasticsearchIndexManager:
                     },
                 },
                 mappings={
+                    "_meta": {
+                        "base_index": self.base_index_name,
+                        "tenant": normalize_tenant(tenant) if self.per_tenant else "*",
+                    },
                     "properties": {
                         "chunk_id": {"type": "keyword"},
                         "doc_id": {"type": "keyword"},
@@ -159,10 +205,15 @@ class ElasticsearchIndexManager:
                     }
                 },
             )
+        return index_name
 
     def reset_index(self) -> None:
-        """Delete and recreate the index (and clear in-memory fallback chunks)."""
-        if self.is_online() and self.client.indices.exists(index=self.index_name):
-            self.client.indices.delete(index=self.index_name)
+        """Delete every tenant's index and recreate the default one (and clear in-memory chunks).
+
+        Indices are deleted one by one, by name. Elasticsearch 8 refuses wildcard deletes
+        by default, and a wildcard is the wrong tool next to other people's indices anyway.
+        """
+        for name in self.tenant_indices():
+            self.client.indices.delete(index=name)
         self.memory_chunks.clear()
         self.ensure_index()

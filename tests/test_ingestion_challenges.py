@@ -102,7 +102,7 @@ class Stack:
         return self.ingestor.ingest(name, raw, **kwargs)
 
     def search(self, query: str, roles: Sequence[str] = ("__public__",), top_k: int = 5) -> List[Dict[str, Any]]:
-        return self.retriever.search(query, self.embedder.embed(query), list(roles), top_k=top_k).authorized_chunks
+        return self.retriever.search(query, self.embedder.embed(query), list(roles), top_k=top_k, tenant="default").authorized_chunks
 
 
 @pytest.fixture
@@ -725,13 +725,13 @@ class ConceptStub:
     def __init__(self, stored: Dict[str, List[str]] | None = None) -> None:
         self.stored = stored or {}
 
-    def forget(self, concept_ids: List[str], *, subject_id: str | None = None) -> int:
+    def forget(self, concept_ids: List[str], *, subject_id: str | None = None, tenant: str | None = None) -> int:
         removed = [key for key, ids in self.stored.items() if set(ids) & set(concept_ids)]
         for key in removed:
             del self.stored[key]
         return len(removed)
 
-    def count_mentions(self, subject_id: str) -> int:
+    def count_mentions(self, subject_id: str, *, tenant: str | None = None) -> int:
         return 0
 
 
@@ -879,7 +879,7 @@ def test_audit_log_and_registry_never_store_the_identifier(stack: Stack, tmp_pat
 
 
 def test_physical_purge_timeout_is_recorded_not_claimed_as_success(stack: Stack, tmp_path: Path, monkeypatch):
-    monkeypatch.setattr(stack.repo, "expunge_deleted_documents", lambda: 4)
+    monkeypatch.setattr(stack.repo, "expunge_deleted_documents", lambda **_: 4)
     service = _erasure(stack, tmp_path)
     assert service.confirm_physical_purge("req-1", max_wait_seconds=0) == 4
     record = json.loads((tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()[-1])
@@ -942,14 +942,14 @@ def api() -> Iterator[TestClient]:
 @pytest.mark.parametrize("path", ["/api/erasure", "/api/sync/events"])
 def test_destructive_endpoints_fail_closed_without_configured_token(api: TestClient, path: str, monkeypatch):
     monkeypatch.delenv("RAG_GOVERNANCE_TOKEN", raising=False)
-    payload = {"subject_id": PERSON, "event_id": "e", "event_type": "deleted", "source_key": "k"}
+    payload = {"tenant": "default", "subject_id": PERSON, "event_id": "e", "event_type": "deleted", "source_key": "k"}
     assert api.post(path, json=payload).status_code == 503
 
 
 @pytest.mark.parametrize("path", ["/api/erasure", "/api/sync/events"])
 def test_destructive_endpoints_reject_wrong_token(api: TestClient, path: str, monkeypatch):
     monkeypatch.setenv("RAG_GOVERNANCE_TOKEN", "right")
-    payload = {"subject_id": PERSON, "event_id": "e", "event_type": "deleted", "source_key": "k"}
+    payload = {"tenant": "default", "subject_id": PERSON, "event_id": "e", "event_type": "deleted", "source_key": "k"}
     assert api.post(path, json=payload, headers={"X-Governance-Token": "wrong"}).status_code == 401
 
 
@@ -965,11 +965,11 @@ def test_erasure_api_is_dry_run_by_default(api: TestClient, stack: Stack, tmp_pa
     monkeypatch.setattr(sys.modules["src.web.app"], "get_kb_service", lambda: Service())
     headers = {"X-Governance-Token": "right"}
 
-    response = api.post("/api/erasure", json={"subject_id": PERSON}, headers=headers)
+    response = api.post("/api/erasure", json={"tenant": "default", "subject_id": PERSON}, headers=headers)
     assert response.json()["status"] == "dry_run"
     assert len(stack.es.memory_chunks) == 1
 
-    response = api.post("/api/erasure", json={"subject_id": PERSON, "dry_run": False}, headers=headers)
+    response = api.post("/api/erasure", json={"tenant": "default", "subject_id": PERSON, "dry_run": False}, headers=headers)
     assert response.json()["status"] == "erased"
     assert stack.es.memory_chunks == []
 

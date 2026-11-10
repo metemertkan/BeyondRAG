@@ -16,6 +16,12 @@ ReportLab, or FastAPI):
   11. Demo Document Seeding        -> `DemoSeederPort` (`seeding.py`)
   12. Erasure & Source Sync        -> `ErasureService`, `SourceSyncHandler` (`erasure.py`)
   13. Retrieval Pipeline           -> `RetrievalPipeline` (`pipeline.py`), `MultiHopPlanner` (`multi_hop.py`)
+  14. Tenant Scope                 -> `tenancy.py` (every read below names exactly one tenant)
+
+Every method that reads or changes stored documents takes ``tenant`` as a required keyword.
+There is deliberately no default: an endpoint that forgets it fails with a ``TypeError``
+instead of answering from another tenant's data. Ingestion keeps its optional tenant
+(``default``), because a write without one cannot spread across tenants.
 """
 
 from __future__ import annotations
@@ -35,6 +41,7 @@ from src.rag.governance import DocumentGovernance, detect_conflicts
 from src.rag.multi_hop import MultiHopPlanner
 from src.rag.pipeline import PipelineOptions, PipelineResult, RetrievalPipeline
 from src.rag.profiles import DEFAULT_INDEX_PREFIX
+from src.rag.tenancy import TenantNotFoundError, require_tenant
 from src.rag.trust import ABSTAIN_MESSAGE, AnswerVerifier, LlmClaimVerifier, TrustReport, apply_trust_policy
 from src.rag.ports import (
     AnswerSynthesizerPort,
@@ -226,37 +233,60 @@ class RBACKnowledgeBaseService:
             **ingest_options,
         )
 
-    def list_documents(self, *, include_superseded: bool = True) -> List[Dict[str, Any]]:
-        if hasattr(self._repository, "list_documents"):
-            try:
-                return self._repository.list_documents(include_superseded=include_superseded)  # type: ignore[call-arg]
-            except TypeError:
-                return self._repository.list_documents()
-        return []
+    def list_documents(self, *, tenant: str, include_superseded: bool = True) -> List[Dict[str, Any]]:
+        return self._repository.list_documents(
+            tenant=require_tenant(tenant), include_superseded=include_superseded
+        )
 
-    def list_available_tags(self) -> List[str]:
-        return collect_available_tags(self.list_documents())
+    def list_available_tags(self, *, tenant: str) -> List[str]:
+        return collect_available_tags(self.list_documents(tenant=tenant))
+
+    def _owned_document(self, doc_id: str, tenant: str) -> str:
+        """Return the tenant scope, or raise not-found.
+
+        A document that belongs to another tenant and a document that does not exist give
+        the same error, so document ids cannot be probed across tenants.
+        """
+        scope = require_tenant(tenant)
+        if self._repository.tenant_of(doc_id) != scope:  # type: ignore[attr-defined]
+            raise TenantNotFoundError(f"Document not found: {doc_id}")
+        return scope
 
     def update_document_tags(
         self,
         doc_id: str,
         tags: List[str] | str | None,
+        *,
+        tenant: str,
     ) -> Dict[str, Any]:
+        scope = self._owned_document(doc_id, tenant)
         acl = resolve_document_acl(tags)
         self._repository.update_document_acl(
             doc_id=doc_id,
             acl_tags=acl.acl_tags,
             is_public=acl.is_public,
+            tenant=scope,
         )
         return {
             "doc_id": doc_id,
+            "tenant": scope,
             "is_public": acl.is_public,
             "tags": acl.visible_tags,
             "acl_tags": acl.acl_tags,
         }
 
-    def delete_document(self, doc_id: str) -> Dict[str, Any]:
-        return self._repository.delete_document(doc_id)
+    def delete_document(self, doc_id: str, *, tenant: str) -> Dict[str, Any]:
+        scope = self._owned_document(doc_id, tenant)
+        return self._repository.delete_document(doc_id, tenant=scope)
+
+    def offboard_tenant(self, tenant: str) -> Dict[str, Any]:
+        """Remove everything one tenant stored: chunks, files, tables, registry, concepts."""
+        from src.rag.cross_lingual import get_concept_registry
+
+        scope = require_tenant(tenant)
+        receipt = self._repository.purge_tenant(scope)  # type: ignore[attr-defined]
+        receipt["concept_entries"] = get_concept_registry().forget_tenant(scope)
+        return receipt
 
     def erasure_service(self) -> Any:
         """Hard-deletion coordinator wired to this service's stores."""
@@ -291,7 +321,11 @@ class RBACKnowledgeBaseService:
         synthesis_mode: str = "fast",
         retrieval_profile: str | None = None,
         pipeline_options: Optional[PipelineOptions] = None,
+        *,
+        tenant: str,
     ) -> Dict[str, Any]:
+        # First line on purpose: nothing below runs without exactly one valid tenant.
+        tenant = require_tenant(tenant)
         cleaned_roles, effective_acl_tags = build_effective_acl_tags(user_roles)
         is_cjk_query = self._cross_lingual.is_cross_lingual(question)
         options = pipeline_options or PipelineOptions.from_env()
@@ -299,12 +333,13 @@ class RBACKnowledgeBaseService:
         expanded_query, matched_concepts = self._cross_lingual.prepare_query(
             question=question,
             allow_llm_fallback=(synthesis_mode == "llm"),
+            tenant=tenant,
         )
 
         pipeline = self._get_pipeline()
 
         def retrieve(search_question: str, search_text: str) -> PipelineResult:
-            # Every search, on every hop, is pinned to this user's ACL tags.
+            # Every search, on every hop, is pinned to this user's tenant and ACL tags.
             return pipeline.run(
                 question=search_question,
                 search_text=search_text,
@@ -312,6 +347,7 @@ class RBACKnowledgeBaseService:
                 top_k=top_k,
                 profile_name=retrieval_profile,
                 options=options,
+                tenant=tenant,
             )
 
         if options.multi_hop:
@@ -345,7 +381,9 @@ class RBACKnowledgeBaseService:
             # passed the ACL, current-version and expiry filters.
             if table_query.table_id not in allowed_tables:
                 raise PermissionError(f"Table {table_query.table_id} was not retrieved for this query")
-            return self._repository.tabular_store.query(table_query, effective_acl_tags)  # type: ignore[attr-defined]
+            return self._repository.tabular_store.query(  # type: ignore[attr-defined]
+                table_query, effective_acl_tags, tenant=tenant
+            )
 
         extra_args: Dict[str, Any] = {}
         synthesize_params = inspect.signature(self._synthesizer.synthesize).parameters
@@ -381,6 +419,7 @@ class RBACKnowledgeBaseService:
 
         return {
             "question": question,
+            "tenant": tenant,
             "is_cross_lingual": is_cjk_query,
             "matched_concepts": matched_concepts,
             "expanded_query": expanded_query,
@@ -422,9 +461,19 @@ _KB_SERVICE_INSTANCE: RBACKnowledgeBaseService | None = None
 
 
 def get_kb_service() -> RBACKnowledgeBaseService:
-    """Return the singleton RBACKnowledgeBaseService instance and ensure sample PDFs are indexed."""
+    """Return the singleton service. In demo mode it starts from freshly seeded sample tenants.
+
+    ``RAG_AUTH_MODE=required`` never resets the index and never loads demo documents: a
+    restart must not delete tenants' data or add documents nobody uploaded.
+    """
     global _KB_SERVICE_INSTANCE
     if _KB_SERVICE_INSTANCE is None:
-        _KB_SERVICE_INSTANCE = RBACKnowledgeBaseService()
-        _KB_SERVICE_INSTANCE.reindex_all_sample_pdfs()
+        from src.rag.auth import auth_mode
+
+        service = RBACKnowledgeBaseService()
+        if auth_mode() == "demo":
+            service.reindex_all_sample_pdfs()
+        else:
+            service._index_manager.ensure_index()
+        _KB_SERVICE_INSTANCE = service
     return _KB_SERVICE_INSTANCE

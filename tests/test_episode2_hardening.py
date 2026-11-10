@@ -10,6 +10,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from src.rag.auth import mint_token
 from src.rag.chunker import create_chunker
 from src.rag.cross_lingual import MultilingualQueryAdapter
 from src.rag.embeddings import (
@@ -330,6 +331,8 @@ def test_es_mapping_declares_versioning_fields():
 
 def test_upload_route_accepts_md_and_txt_and_source_key():
     client = TestClient(app)
+    # Uploads need a signed token with a write role; the tenant comes from the token.
+    client.headers.update({"Authorization": f"Bearer {mint_token('default', ['admin'])}"})
     # Avoid singleton reseeding cost flakiness: hit upload with txt.
     files = {"file": ("limits.md", b"# Buffer\n\nHKD 450,000,000 cash buffer.\n", "text/markdown")}
     data = {"tags": "finance", "source_key": "demo-md-source"}
@@ -355,7 +358,7 @@ def test_list_documents_includes_superseded_status():
     sk = "shared-policy"
     m1 = ingestor.ingest(POLICY_V1.name, POLICY_V1.read_bytes(), tags=["finance"], source_key=sk)
     m2 = ingestor.ingest(POLICY_V2.name, POLICY_V2.read_bytes(), tags=["finance"], source_key=sk)
-    docs = {d["doc_id"]: d for d in repo.list_documents(include_superseded=True)}
+    docs = {d["doc_id"]: d for d in repo.list_documents(tenant="default", include_superseded=True)}
     assert docs[m1["doc_id"]]["status"] == IngestionState.SUPERSEDED.value
     assert docs[m2["doc_id"]]["status"] == IngestionState.INDEXED.value
     assert docs[m1["doc_id"]]["is_current"] is False

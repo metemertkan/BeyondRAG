@@ -262,8 +262,8 @@ def _service(tmp_path: Any, reply: str, verifier: Any = None) -> Any:
     repository = DocumentRepository(es_manager=manager, uploads_dir=tmp_path / "u", registry_path=tmp_path / "r.json")
     cross_lingual = SimpleNamespace(
         is_cross_lingual=lambda text: False,
-        extract_concepts_at_ingestion=lambda filename, full_text: ([], "none"),
-        prepare_query=lambda question, allow_llm_fallback=False: (question, []),
+        extract_concepts_at_ingestion=lambda filename, full_text, tenant=None: ([], "none"),
+        prepare_query=lambda question, allow_llm_fallback=False, tenant=None: (question, []),
     )
     service = RBACKnowledgeBaseService(
         index_manager=manager,
@@ -284,7 +284,7 @@ def _service(tmp_path: Any, reply: str, verifier: Any = None) -> Any:
 
 def test_service_returns_a_trust_report_and_applies_the_policy(tmp_path: Any):
     service = _service(tmp_path, "- Rotate every 180 days [S1]\n- Rotate every 90 days [S1]")
-    result = service.query_and_chat("rotate network password", synthesis_mode="llm", pipeline_options=PipelineOptions(verify=True, trust_mode="strip"))
+    result = service.query_and_chat("rotate network password", synthesis_mode="llm", pipeline_options=PipelineOptions(verify=True, trust_mode="strip"), tenant="default")
     report = result["trust_report"]
     assert [s["status"] for s in report["sentences"]] == ["supported", "unsupported"]
     assert "90 days" not in result["answer"] and report["removed"] == 1
@@ -299,13 +299,13 @@ def test_verification_never_sees_restricted_documents(tmp_path: Any):
             return TrustReport("grounded", [], [])
 
     service = _service(tmp_path, "Rotate every 180 days [S1]", Spy())
-    service.query_and_chat("rotate network password", user_roles=[], synthesis_mode="llm", pipeline_options=PipelineOptions(verify=True))
+    service.query_and_chat("rotate network password", user_roles=[], synthesis_mode="llm", pipeline_options=PipelineOptions(verify=True), tenant="default")
     assert seen and all("9,999" not in str(source["text"]) for source in seen.values())
 
 
 def test_fast_answers_are_reported_as_extractive(tmp_path: Any):
     service = _service(tmp_path, "unused")
-    result = service.query_and_chat("rotate network password", pipeline_options=PipelineOptions(verify=True))
+    result = service.query_and_chat("rotate network password", pipeline_options=PipelineOptions(verify=True), tenant="default")
     assert result["trust_report"]["verdict"] == "extractive"
 
 
@@ -316,6 +316,7 @@ def test_relevance_gate_refuses_before_any_llm_call(tmp_path: Any):
     result = service.query_and_chat(
         "rotate network password", synthesis_mode="llm",
         pipeline_options=PipelineOptions(rerank=True, min_relevance=0.5),
+        tenant="default",
     )
     assert result["answer"] == ABSTAIN_MESSAGE and not calls
     assert "below the 0.500 threshold" in result["trust_report"]["abstain_reason"]
@@ -323,7 +324,7 @@ def test_relevance_gate_refuses_before_any_llm_call(tmp_path: Any):
 
 def test_without_verify_there_is_no_report(tmp_path: Any):
     service = _service(tmp_path, "Rotate every 180 days [S1]")
-    result = service.query_and_chat("rotate network password", synthesis_mode="llm", pipeline_options=PipelineOptions())
+    result = service.query_and_chat("rotate network password", synthesis_mode="llm", pipeline_options=PipelineOptions(), tenant="default")
     assert result["trust_report"] is None
 
 

@@ -1,7 +1,11 @@
 """Component 7: Demo Document Seeding (`DemoDocumentSeeder`).
 
-Generates the 4 enterprise sample PDFs in memory using ReportLab and seeds them
-into the RAG knowledge base without coupling demo fixtures to the domain service.
+Generates the sample PDFs in memory using ReportLab and seeds them into the RAG knowledge
+base without coupling demo fixtures to the domain service.
+
+There are two demo tenants, ``acme`` and ``globex``. Both use the same role names
+(``finance``, ``operation``) on purpose: a role filter alone cannot tell them apart, so the
+same question from the same role must give a different answer in each tenant.
 """
 
 from __future__ import annotations
@@ -11,12 +15,14 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Final, List, Protocol
 
+from src.rag.tenancy import normalize_tenant
+
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
 
 class _SeedTarget(Protocol):
-    def list_documents(self) -> List[Dict[str, Any]]:
+    def list_documents(self, *, tenant: str) -> List[Dict[str, Any]]:
         ...
 
     def ingest_pdf_bytes(
@@ -140,33 +146,99 @@ DEMO_ENTERPRISE_SAMPLES: Final[List[Dict[str, Any]]] = [
 ]
 
 
+GLOBEX_SAMPLES: Final[List[Dict[str, Any]]] = [
+    {
+        "filename": "Globex_Employee_Handbook_2026.pdf",
+        "tags": [],
+        "pages": [
+            [
+                "1. General Workplace & Hybrid Attendance Policy (Public Knowledge Base): "
+                "All Globex Freight employees at the Rotterdam Waalhaven head office operate on a "
+                "core hours schedule from 09:00 CET to 17:30 CET Monday through Friday.",
+                "2. Severe Weather Protocol: When the KNMI issues a Code Red storm warning, physical "
+                "office attendance is suspended and remote work mode activates automatically.",
+                "3. IT Service Desk: For hardware support, contact servicedesk@globex-freight.example "
+                "or dial extension 4100.",
+            ]
+        ],
+    },
+    {
+        "filename": "Globex_Treasury_Liquidity_Policy_Q4.pdf",
+        "tags": ["finance"],
+        "pages": [
+            [
+                "RESTRICTED — FINANCE & TREASURY ROLE ONLY. "
+                "1. Minimum Cash Buffer: The Globex Treasury team must maintain an intraday minimum "
+                "unencumbered cash reserve of EUR 38,000,000 (38M EUR) across ING and Rabobank "
+                "clearing accounts at all times.",
+                "2. Foreign Exchange (FX) Hedging: Any FX forward contract exceeding EUR 4,000,000 "
+                "requires sign-off from the Chief Financial Officer (CFO). Unhedged USD exposure is "
+                "capped at EUR 9,500,000.",
+                "3. Project Nightjar: The board approved an acquisition budget of EUR 61,000,000 for "
+                "Project Nightjar. This figure is confidential until the public announcement.",
+            ]
+        ],
+    },
+    {
+        "filename": "Globex_Warehouse_Operations_SOP.pdf",
+        "tags": ["operation"],
+        "pages": [
+            [
+                "RESTRICTED — OPERATIONS & LOGISTICS ROLE ONLY. "
+                "1. Maasvlakte Terminal Dispatch SLA: Operations supervisors must maintain a 97.5% "
+                "on-time vessel loading and gate-out dispatch rate. Any container dwell time "
+                "exceeding 48 hours triggers an escalation to the Head of Operations.",
+                "2. Cold-Chain Protocol: Reefer containers transiting Schiphol Cargo must maintain "
+                "continuous telemetry between +2.0 C and +6.0 C. Excursion alarms require physical "
+                "inspection within 20 minutes.",
+            ]
+        ],
+    },
+]
+
+# Tenant id -> the documents that tenant starts with.
+DEMO_TENANT_SAMPLES: Final[Dict[str, List[Dict[str, Any]]]] = {
+    "acme": DEMO_ENTERPRISE_SAMPLES,
+    "globex": GLOBEX_SAMPLES,
+}
+DEMO_TENANTS: Final[tuple[str, ...]] = tuple(DEMO_TENANT_SAMPLES)
+DEMO_ROLES: Final[tuple[str, ...]] = ("finance", "operation", "admin")
+
+
 class DemoDocumentSeeder:
-    """Seeds the 4 sample enterprise PDFs into any target implementing `_SeedTarget`."""
+    """Seeds each demo tenant's sample PDFs into any target implementing `_SeedTarget`."""
 
     def seed(self, service: _SeedTarget) -> List[Dict[str, Any]]:
-        existing_filenames = {d["filename"] for d in service.list_documents()}
         seeded: List[Dict[str, Any]] = []
-
-        for sample in DEMO_ENTERPRISE_SAMPLES:
-            if sample["filename"] in existing_filenames:
-                continue
-            pdf_bytes = create_pdf_bytes(sample["filename"], sample["pages"])
-            meta = service.ingest_pdf_bytes(
-                filename=sample["filename"],
-                pdf_bytes=pdf_bytes,
-                tags=sample["tags"],
-            )
-            seeded.append(meta)
-
+        for tenant, samples in DEMO_TENANT_SAMPLES.items():
+            existing_filenames = {d["filename"] for d in service.list_documents(tenant=tenant)}
+            for sample in samples:
+                if sample["filename"] in existing_filenames:
+                    continue
+                pdf_bytes = create_pdf_bytes(sample["filename"], sample["pages"])
+                seeded.append(
+                    service.ingest_pdf_bytes(
+                        filename=sample["filename"],
+                        pdf_bytes=pdf_bytes,
+                        tags=sample["tags"],
+                        tenant=tenant,
+                    )
+                )
         return seeded
 
 
 LAB_DOCUMENTS_PATH: Final[Path] = Path(__file__).resolve().parents[2] / "config" / "ep3_demo_docs.json"
 
 
-def seed_lab_documents(service: _SeedTarget, path: Path = LAB_DOCUMENTS_PATH) -> List[Dict[str, Any]]:
-    """Ingest the Retrieval Lab corpus. Skips what is already there, so it can be run again."""
-    existing = {d["filename"] for d in service.list_documents()}
+def seed_lab_documents(
+    service: _SeedTarget,
+    path: Path = LAB_DOCUMENTS_PATH,
+    *,
+    tenant: str | None = None,
+) -> List[Dict[str, Any]]:
+    """Ingest the Retrieval Lab corpus into one tenant. Skips what is already there."""
+    scope = normalize_tenant(tenant)
+    existing = {d["filename"] for d in service.list_documents(tenant=scope)}
     seeded: List[Dict[str, Any]] = []
     for document in json.loads(path.read_text(encoding="utf-8")):
         if document["filename"] not in existing:
@@ -175,6 +247,7 @@ def seed_lab_documents(service: _SeedTarget, path: Path = LAB_DOCUMENTS_PATH) ->
                     filename=document["filename"],
                     pdf_bytes=document["text"].encode("utf-8"),
                     tags=document["tags"],
+                    tenant=scope,
                     extract_concepts=False,  # English documents, so loading stays quick.
                 )
             )
