@@ -365,6 +365,11 @@ def _select_ollama_model() -> str:
     return env_model
 
 
+def concept_max_tokens() -> int:
+    """Output token limit for concept extraction. ``RAG_CONCEPT_MAX_TOKENS``."""
+    return int(os.getenv("RAG_CONCEPT_MAX_TOKENS", "1024"))
+
+
 def extract_concepts_at_ingestion(
     filename: str,
     full_text: str,
@@ -408,7 +413,8 @@ def extract_concepts_at_ingestion(
         "stream": False,
         "think": False,
         "format": "json",
-        "options": {"temperature": 0.0, "num_predict": 480},
+        # 480 cut qwen3:8b off mid-JSON on 6 of 7 demo documents (scripts/ep6_benchmark.py).
+        "options": {"temperature": 0.0, "num_predict": concept_max_tokens()},
     }
 
     extracted_concepts: List[Dict[str, Any]] = []
@@ -420,6 +426,9 @@ def extract_concepts_at_ingestion(
                 resp.raise_for_status()
                 body = resp.json()
                 call.set_usage(body.get("prompt_eval_count"), body.get("eval_count"))
+            if body.get("done_reason") == "length":
+                # Say so, instead of the JSON error a cut-off answer would raise below.
+                raise ValueError(f"the model stopped at the {concept_max_tokens()}-token output limit")
             parsed = json.loads(body.get("message", {}).get("content", "{}"))
             raw_list = parsed.get("concepts", [])
             if isinstance(raw_list, list):

@@ -43,6 +43,7 @@ OUTCOME_GROUPS: Final[Dict[str, str]] = {
     "answered": "ok",
     "answered_extractive": "ok",
     "degraded_llm_fallback": "degraded",
+    "degraded_model_substituted": "degraded",
     "budget_exceeded": "degraded",
     "answered_with_unsupported_claims": "degraded",
     "abstained_model": "refused",
@@ -613,6 +614,7 @@ def classify_outcome(record: RequestRecord, synthesis_mode: str, trust_report: O
         ("low_relevance", "abstained_low_relevance"),
         ("budget_exceeded", "budget_exceeded"),
         ("llm_fallback", "degraded_llm_fallback"),
+        ("model_substituted", "degraded_model_substituted"),
         ("model_abstained", "abstained_model"),
     ):
         if record.has(event):

@@ -605,8 +605,8 @@ def run_context_injection(bench: Bench) -> Dict[str, Any]:
             texts += [" ".join(page) for page in sample["pages"]]
     lab_path = ROOT / "config" / "ep3_demo_docs.json"
     if lab_path.exists():
-        for document in json.loads(lab_path.read_text(encoding="utf-8")).get("documents", []):
-            texts.append(str(document.get("text") or document.get("content") or ""))
+        for document in json.loads(lab_path.read_text(encoding="utf-8")):
+            texts.append(str(document.get("text") or ""))
     flagged = [{"rule": match_rules(t, CONTEXT_RULES), "text": t[:200]} for t in texts if match_rules(t, CONTEXT_RULES)]
 
     summary = {}
@@ -618,6 +618,46 @@ def run_context_injection(bench: Bench) -> Dict[str, Any]:
                 "dropped": sum(r["dropped"] for r in mine), "in_context": sum(r["planted_in_context"] for r in mine),
             }
     return {"llm": bench.args.llm, "summary": summary, "clean_passages": len(texts), "clean_passages_flagged": flagged, "rows": rows}
+
+
+# --- concepts ---------------------------------------------------------------------------
+
+
+def run_concepts(bench: Bench) -> Dict[str, Any]:
+    """Concept extraction on the seven demo documents, in a fresh tenant, with the current limit."""
+    from src.rag.cross_lingual import concept_max_tokens
+    from src.rag.seeding import DEMO_TENANT_SAMPLES, create_pdf_bytes
+
+    tenant = f"conceptlab{uuid.uuid4().hex[:6]}"
+    rows = []
+    for samples in DEMO_TENANT_SAMPLES.values():
+        for sample in samples:
+            bench.spans.clear()
+            started = time.perf_counter()
+            bench.service.ingest_pdf_bytes(
+                filename=sample["filename"], pdf_bytes=create_pdf_bytes(sample["filename"], sample["pages"]),
+                tags=sample["tags"], tenant=tenant,
+            )
+            calls = bench.model_spans("concept_extraction")
+            events = [e.attributes.get("rag.detail", "") for s in bench.spans.get_finished_spans() for e in s.events if e.name == "concept_extraction_failed"]
+            concepts = [d for d in bench.service.list_documents(tenant=tenant) if d.get("filename") == sample["filename"]]
+            row = {
+                "filename": sample["filename"],
+                "seconds": round(time.perf_counter() - started, 1),
+                "output_tokens": sum(int(s.attributes.get("gen_ai.usage.output_tokens", 0)) for s in calls),
+                "input_tokens": sum(int(s.attributes.get("gen_ai.usage.input_tokens", 0)) for s in calls),
+                "failed": bool(events),
+                "failure": events[0] if events else "",
+                "registered": bool(concepts),
+            }
+            rows.append(row)
+            print(f"  {sample['filename']:<44} failed={row['failed']} out={row['output_tokens']} {row['seconds']}s {row['failure'][:80]}", flush=True)
+    return {
+        "llm": bench.args.llm, "max_tokens": concept_max_tokens(), "documents": len(rows),
+        "failed": sum(r["failed"] for r in rows), "mean_output_tokens": round(statistics.mean(r["output_tokens"] for r in rows), 1),
+        "max_output_tokens": max(r["output_tokens"] for r in rows), "total_seconds": round(sum(r["seconds"] for r in rows), 1),
+        "rows": rows,
+    }
 
 
 # --- budget -----------------------------------------------------------------------------
@@ -740,6 +780,7 @@ SECTIONS: Dict[str, Callable[[Bench], Dict[str, Any]]] = {
     "tokens": run_tokens,
     "context_injection": run_context_injection,
     "budget": run_budget,
+    "concepts": run_concepts,
     "overhead": run_overhead,
 }
 

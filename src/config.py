@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any, Final
@@ -14,6 +15,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 # RAG_WORKSPACE_DIR moves the registry, uploads and other state. The tests point it at a
@@ -137,6 +140,11 @@ def get_llm(role: str = "architect", temperature: float = 0.2) -> BaseChatModel:
                 selected = pref
                 break
         ollama_model_name = selected or installed_models[0]
+        # This used to happen without a word: a typo in OLLAMA_MODEL served another model.
+        from src.rag.telemetry import note
+
+        logger.warning("OLLAMA_MODEL %s is not installed; using %s", env_ollama_model, ollama_model_name)
+        note("model_substituted", f"{env_ollama_model} is not installed; used {ollama_model_name}")
     else:
         ollama_model_name = "qwen2.5:1.5b"
 

@@ -249,6 +249,7 @@ def test_direct_http_calls_report_usage_and_errors():
         (["llm_fallback"], "llm", None, "degraded_llm_fallback"),
         (["blocked_input", "llm_fallback"], "llm", None, "blocked_input"),
         (["model_abstained"], "llm", None, "abstained_model"),
+        (["model_substituted"], "llm", None, "degraded_model_substituted"),
         ([], "llm", {"verdict": "has_unsupported_claims", "abstained": False}, "answered_with_unsupported_claims"),
         ([], "llm", {"verdict": "abstained", "abstained": True}, "abstained_unverified"),
     ],
