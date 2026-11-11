@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, Final, List, Sequence
 from pydantic import BaseModel, Field
 
 from src.config import get_llm
+from src.rag import telemetry
 from src.rag.pipeline import PipelineResult
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,7 @@ class MultiHopPlanner:
             )
         except Exception as exc:
             logger.warning("Decomposition failed; using a single search: %s", exc)
+            telemetry.note("multi_hop_failed", f"decomposition: {type(exc).__name__}: {exc}")
             return [question]
         steps = [" ".join(str(step).split()) for step in (result.steps if result else [])]
         return [step for step in steps if step][:max_hops] or [question]
@@ -120,6 +122,7 @@ class MultiHopPlanner:
                 found = self.answer_step(search, retrieved.chunks) if retrieved.chunks else _StepAnswer(found=False)
             except Exception as exc:
                 logger.warning("Step %s could not be answered: %s", number, exc)
+                telemetry.note("multi_hop_failed", f"step {number}: {type(exc).__name__}: {exc}")
                 result.hops.append(HopRecord(number, planned, search, False, "", _sources(retrieved)))
                 result.stopped_reason = f"Step {number} could not be answered: {exc}"
                 break

@@ -11,9 +11,11 @@ import logging
 import math
 import os
 import time
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
+from src.rag import telemetry
 from src.rag.fusion import reciprocal_rank_fusion
 from src.rag.governance import apply_trust_ranking
 from src.rag.parent_child import expand_to_parents
@@ -124,6 +126,7 @@ class RetrievalPipeline:
         except Exception as exc:
             # Keep the first-stage order, and say so. A silent fallback would look re-ranked.
             logger.warning("Re-ranking failed; keeping first-stage order: %s", exc)
+            telemetry.note("rerank_failed", f"{type(exc).__name__}: {exc}")
             trace["rerank"] = {"status": "failed", "reason": str(exc)}
             return chunks
         before = [c["chunk_id"] for c in chunks]
@@ -166,7 +169,14 @@ class RetrievalPipeline:
         options = options or PipelineOptions()
         started = time.perf_counter()
         trace: Dict[str, Any] = {"options": asdict(options)}
-        plan: QueryPlan = self._transformer.plan(question, search_text, options.query_mode)
+        # No span when the stage is off: an empty one would pull the stage's latency towards zero.
+        transform = (
+            telemetry.stage("query_transform", mode=options.query_mode) if options.query_mode != "off" else nullcontext()
+        )
+        with transform:
+            plan: QueryPlan = self._transformer.plan(question, search_text, options.query_mode)
+            for error in plan.errors:
+                telemetry.note("query_transform_failed", error)
         trace["variants"] = [{"kind": v.kind, "text": v.text, "lexical": v.lexical, "dense": v.dense} for v in plan.variants]
         if plan.errors:
             trace["transform_errors"] = plan.errors
@@ -174,10 +184,11 @@ class RetrievalPipeline:
         broad = options.rerank or len(plan.variants) > 1
         # Without a second stage, keep three times top_k so trust ranking and parent merging have room.
         candidate_k = options.candidates if broad else top_k * 3
-        outcomes = [
-            self._search_variant(variant, acl_tags, top_k, profile_name, options, candidate_k, tenant)
-            for variant in plan.variants
-        ]
+        with telemetry.stage("search", variants=len(plan.variants), candidates=candidate_k):
+            outcomes = [
+                self._search_variant(variant, acl_tags, top_k, profile_name, options, candidate_k, tenant)
+                for variant in plan.variants
+            ]
         first = outcomes[0]
         trace["first_stage"] = {
             "candidates": candidate_k,
@@ -192,7 +203,8 @@ class RetrievalPipeline:
         trace["first_stage"]["count"] = len(chunks)
 
         if options.rerank and chunks:
-            chunks = self._rerank(question, chunks, trace)
+            with telemetry.stage("rerank", pairs=len(chunks)):
+                chunks = self._rerank(question, chunks, trace)
 
         chunks, merged = expand_to_parents(chunks)
         parents = sum(1 for c in chunks if c.get("matched_children"))

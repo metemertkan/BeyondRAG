@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, Final, List, Optional, Protocol, Tuple
 import httpx
 
 from src.config import OLLAMA_BASE_URL, WORKSPACE_DIR, _detect_host_ollama_models, get_llm
+from src.rag import telemetry
 from src.rag.language_packs import (
     LanguagePack,
     LanguagePackRegistry,
@@ -413,9 +414,13 @@ def extract_concepts_at_ingestion(
     extracted_concepts: List[Dict[str, Any]] = []
     try:
         with httpx.Client(timeout=180.0) as client:
-            resp = client.post(f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat", json=payload)
-            resp.raise_for_status()
-            parsed = json.loads(resp.json().get("message", {}).get("content", "{}"))
+            # A direct HTTP call. No LangChain callback sees it, so it reports itself.
+            with telemetry.llm_call(model_name, "ollama", temperature=0.0, max_tokens=480) as call:
+                resp = client.post(f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat", json=payload)
+                resp.raise_for_status()
+                body = resp.json()
+                call.set_usage(body.get("prompt_eval_count"), body.get("eval_count"))
+            parsed = json.loads(body.get("message", {}).get("content", "{}"))
             raw_list = parsed.get("concepts", [])
             if isinstance(raw_list, list):
                 for idx, item in enumerate(raw_list, start=1):
@@ -443,7 +448,11 @@ def extract_concepts_at_ingestion(
                     concept[expansion_field] = expansion
                     if any_triggers:
                         extracted_concepts.append(concept)
-    except Exception:
+    except Exception as exc:
+        # This used to return an empty list and say nothing: the document loaded without
+        # its concepts and nothing recorded why.
+        logger.warning("Concept extraction failed for %s; it loads without concepts: %s", filename, exc)
+        telemetry.note("concept_extraction_failed", f"{type(exc).__name__}: {exc}")
         extracted_concepts = []
 
     if extracted_concepts:
@@ -539,22 +548,24 @@ class LLMQueryTranslator:
             resp = llm.invoke(prompt)
             translated = str(getattr(resp, "content", resp)).strip()
             if translated:
+                # No query text here: a log line is not where a user's question should live.
                 logger.info(
-                    "Translated query from %s to %s: '%s' -> '%s'",
+                    "Translated a query from %s to %s (%d -> %d characters)",
                     source_language,
                     target_language,
-                    query,
-                    translated,
+                    len(query),
+                    len(translated),
                 )
                 return translated
+            telemetry.note("translation_failed", "the model returned an empty translation")
         except Exception as exc:
             logger.warning(
-                "Query translation failed (%s -> %s) for '%s': %s. Using original query.",
+                "Query translation failed (%s -> %s): %s. Using the original query.",
                 source_language,
                 target_language,
-                query,
                 exc,
             )
+            telemetry.note("translation_failed", f"{type(exc).__name__}: {exc}")
         return query
 
 
@@ -623,12 +634,13 @@ class MultilingualQueryAdapter:
         full_text: str,
         tenant: str | None = None,
     ) -> Tuple[List[Dict[str, Any]], str]:
-        return extract_concepts_at_ingestion(
-            filename,
-            full_text,
-            pack_registry=self.language_pack,
-            tenant=tenant,
-        )
+        with telemetry.stage("concept_extraction"):
+            return extract_concepts_at_ingestion(
+                filename,
+                full_text,
+                pack_registry=self.language_pack,
+                tenant=tenant,
+            )
 
     def prepare_query(
         self,

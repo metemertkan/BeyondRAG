@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, Final, List, Optional
 from langchain_core.prompts import ChatPromptTemplate
 
 from src.config import get_llm
+from src.rag import telemetry
 from src.rag.embeddings import STOPWORDS, has_cjk
 from src.rag.fusion import reorder_for_attention
 from src.rag.governance import DEFAULT_TRUST_TIER, SOURCE_PRECEDENCE_RULES, detect_conflicts
@@ -152,10 +153,12 @@ class GroundedAnswerSynthesizer:
             if masked_restricted_docs:
                 locked_doc = masked_restricted_docs[0]["filename"]
                 req_role_str = ", ".join(masked_restricted_docs[0]["required_any_of_tags"])
+                telemetry.note("access_blocked", "the only matches are documents this user's roles cannot read")
                 return (
                     f"🔒 **Access Blocked by RBAC Pre-Filter**\n"
                     f"📄 `{locked_doc}` — Required Role: **`{req_role_str}`**"
                 )
+            telemetry.note("no_documents", "no retrieved chunk matches the question")
             return f"No matching documents for role {role_display}."
 
         if synthesis_mode == "llm":
@@ -167,12 +170,14 @@ class GroundedAnswerSynthesizer:
                 table_chunks = [c for c in relevant_chunks if c.get("block_type") == "table_summary"]
                 if table_chunks and table_query_runner is not None:
                     try:
-                        table_source = self._run_table_query(question, table_chunks, table_query_runner)
+                        with telemetry.stage("table_query"):
+                            table_source = self._run_table_query(question, table_chunks, table_query_runner)
                         if table_source:
                             sources.append({"filename": table_chunks[0]["filename"], "page_number": table_chunks[0]["page_number"], "text": table_source})
                     except Exception as exc:
                         # The summary chunk is still in context, so the answer can proceed.
                         logger.warning("Structured table query failed: %s", exc)
+                        telemetry.note("table_query_failed", f"{type(exc).__name__}: {exc}")
                 for c in ordered:
                     sources.append(
                         {
@@ -234,10 +239,15 @@ class GroundedAnswerSynthesizer:
                     if not self._cite_sources:
                         return content
                     if is_not_found(content):
+                        telemetry.note("model_abstained", "the model said the sources do not answer the question")
                         return ABSTAIN_MESSAGE
                     return render_citations(without_not_found(content), self.last_sources)
+                # An empty answer used to fall through to the fast answer with no log line at all.
+                logger.warning("The model returned an empty answer; using the fast citation answer")
+                telemetry.note("llm_fallback", "the model returned an empty answer")
             except Exception as exc:
                 logger.warning("LLM synthesis failed; using the fast citation answer: %s", exc)
+                telemetry.note("llm_fallback", f"{type(exc).__name__}: {exc}")
 
         conflicts = detect_conflicts(relevant_chunks)
         top = relevant_chunks[0]

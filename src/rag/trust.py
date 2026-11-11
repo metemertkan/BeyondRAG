@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, Final, List, Literal, Mapping, Optional,
 from pydantic import BaseModel, Field
 
 from src.config import get_llm
+from src.rag import telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -259,6 +260,7 @@ class AnswerVerifier:
             except Exception as exc:
                 # Reported, so the absence of an LLM check is never mistaken for a pass.
                 logger.warning("LLM claim verification failed: %s", exc)
+                telemetry.note("verifier_failed", f"{type(exc).__name__}: {exc}")
                 run[-1] = "llm_failed"
                 verdicts = {}
             for check in checks:

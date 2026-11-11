@@ -24,6 +24,7 @@ from typing import Final, List, Optional, Protocol
 import httpx
 
 from src.config import GOOGLE_API_KEY, OLLAMA_BASE_URL, is_valid_api_key
+from src.rag import telemetry
 from src.rag.multilingual import normalize_for_matching
 
 # Latin/digits, Arabic-script words, and runs of CJK. CJK runs are hashed as bigrams
@@ -274,12 +275,15 @@ class OllamaEmbeddingProvider:
         if not texts:
             return []
         try:
-            resp = self._client.post(
-                f"{self.base_url}/api/embed",
-                json={"model": self.model_name, "input": texts},
-            )
-            resp.raise_for_status()
-            payload = resp.json()
+            # Not a LangChain call, so it has to report itself or the tokens are never counted.
+            with telemetry.llm_call(self.model_name, "ollama", operation="embeddings") as call:
+                resp = self._client.post(
+                    f"{self.base_url}/api/embed",
+                    json={"model": self.model_name, "input": texts},
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+                call.set_usage(payload.get("prompt_eval_count"), None)
             raw_embeddings = payload.get("embeddings", [])
             if not raw_embeddings or len(raw_embeddings) != len(texts):
                 raise RuntimeError(

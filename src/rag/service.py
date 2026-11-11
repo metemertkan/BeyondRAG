@@ -27,7 +27,7 @@ instead of answering from another tenant's data. Ingestion keeps its optional te
 from __future__ import annotations
 
 import inspect
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any, Dict, Final, List, Optional
 
 from src.rag.acl import (
@@ -37,11 +37,13 @@ from src.rag.acl import (
     normalize_tags,
     resolve_document_acl,
 )
+from src.rag import telemetry
 from src.rag.governance import DocumentGovernance, detect_conflicts
+from src.rag.guardrails import GuardrailEngine, get_guardrails
 from src.rag.multi_hop import MultiHopPlanner
 from src.rag.pipeline import PipelineOptions, PipelineResult, RetrievalPipeline
 from src.rag.profiles import DEFAULT_INDEX_PREFIX
-from src.rag.tenancy import TenantNotFoundError, require_tenant
+from src.rag.tenancy import TenantNotFoundError, normalize_tenant, require_tenant
 from src.rag.trust import ABSTAIN_MESSAGE, AnswerVerifier, LlmClaimVerifier, TrustReport, apply_trust_policy
 from src.rag.ports import (
     AnswerSynthesizerPort,
@@ -150,7 +152,10 @@ class RBACKnowledgeBaseService:
         reranker: RerankerPort | None = None,
         multi_hop_planner: MultiHopPlanner | None = None,
         answer_verifier: AnswerVerifier | None = None,
+        guardrails: GuardrailEngine | None = None,
     ) -> None:
+        # On the service, not on the HTTP route, so every caller goes through the same checks.
+        self._guardrails = guardrails or get_guardrails()
         self._reranker_override = reranker
         self._answer_verifier = answer_verifier or AnswerVerifier(LlmClaimVerifier())
         self._multi_hop = multi_hop_planner or MultiHopPlanner()
@@ -222,16 +227,17 @@ class RBACKnowledgeBaseService:
         governance: DocumentGovernance | None = None,
         **ingest_options: Any,
     ) -> Dict[str, Any]:
-        return self._ingestor.ingest(
-            filename=filename,
-            pdf_bytes=pdf_bytes,
-            tags=tags,
-            doc_id=doc_id,
-            tenant=tenant,
-            source_key=source_key,
-            governance=governance,
-            **ingest_options,
-        )
+        with telemetry.stage("ingest", tenant=normalize_tenant(tenant), bytes=len(pdf_bytes)):
+            return self._ingestor.ingest(
+                filename=filename,
+                pdf_bytes=pdf_bytes,
+                tags=tags,
+                doc_id=doc_id,
+                tenant=tenant,
+                source_key=source_key,
+                governance=governance,
+                **ingest_options,
+            )
 
     def list_documents(self, *, tenant: str, include_superseded: bool = True) -> List[Dict[str, Any]]:
         return self._repository.list_documents(
@@ -286,6 +292,9 @@ class RBACKnowledgeBaseService:
         scope = require_tenant(tenant)
         receipt = self._repository.purge_tenant(scope)  # type: ignore[attr-defined]
         receipt["concept_entries"] = get_concept_registry().forget_tenant(scope)
+        # The local count only. Metrics, traces and logs already sent to a backend keep the
+        # tenant's name until that backend's retention removes them.
+        receipt["token_ledger_entries"] = self._guardrails.ledger.forget_tenant(scope)
         return receipt
 
     def erasure_service(self) -> Any:
@@ -329,21 +338,81 @@ class RBACKnowledgeBaseService:
     ) -> Dict[str, Any]:
         # First line on purpose: nothing below runs without exactly one valid tenant.
         tenant = require_tenant(tenant)
-        cleaned_roles, effective_acl_tags = build_effective_acl_tags(user_roles)
-        is_cjk_query = self._cross_lingual.is_cross_lingual(question)
-        options = pipeline_options or PipelineOptions.from_env()
+        with telemetry.request_scope(tenant, synthesis_mode, question) as record:
+            response = self._answer(
+                question, user_roles, top_k, synthesis_mode, retrieval_profile, pipeline_options, tenant
+            )
+            # Every request leaves with exactly one label. "It returned 200" is not one of them.
+            record.outcome = telemetry.classify_outcome(record, synthesis_mode, response.get("trust_report"))
+        # Read after the scope closes, so the duration and the reason are final.
+        response["telemetry"] = record.to_dict()
+        response["guardrails"]["decisions"] = list(record.guardrails)
+        return response
 
-        expanded_query, matched_concepts = self._cross_lingual.prepare_query(
-            question=question,
-            allow_llm_fallback=(synthesis_mode == "llm"),
-            tenant=tenant,
-        )
+    def _answer(
+        self,
+        question: str,
+        user_roles: List[str] | str | None,
+        top_k: int,
+        synthesis_mode: str,
+        retrieval_profile: str | None,
+        pipeline_options: Optional[PipelineOptions],
+        tenant: str,
+    ) -> Dict[str, Any]:
+        guard = self._guardrails
+        guarded = guard.policy.enabled
+        cleaned_roles, effective_acl_tags = build_effective_acl_tags(user_roles)
+        options = pipeline_options or PipelineOptions.from_env()
+        dropped_chunks: List[Dict[str, Any]] = []
+        guardrail_report: Dict[str, Any] = {"enabled": guarded, "decisions": [], "dropped_chunks": dropped_chunks}
+
+        if guarded:
+            with telemetry.stage("guardrail_input"):
+                verdict = guard.check_input(question)
+            # From here on only the checked question exists. Personal data found in it is masked.
+            question = verdict.question
+            if verdict.blocked:
+                telemetry.note("blocked_input", verdict.guardrail)
+                return {
+                    "question": question,
+                    "tenant": tenant,
+                    "is_cross_lingual": False,
+                    "matched_concepts": [],
+                    "expanded_query": "",
+                    "user_roles": cleaned_roles,
+                    "effective_acl_filter": effective_acl_tags,
+                    "latency_ms": 0.0,
+                    "authorized_chunks": [],
+                    "masked_restricted_docs": [],
+                    "es_query_dsl": {},
+                    "conflicts": [],
+                    "retrieval_trace": {},
+                    "trust_report": None,
+                    "answer": verdict.message,
+                    "guardrails": guardrail_report,
+                }
+            uses_model = synthesis_mode == "llm" or options.query_mode != "off" or options.multi_hop
+            if uses_model and guard.over_budget(tenant):
+                # Still answers, from the documents alone. Search and its embedding call go on.
+                telemetry.note("budget_exceeded", "the daily token budget is used up; answered without the model")
+                synthesis_mode = "fast"
+                options = replace(options, query_mode="off", multi_hop=False, verify=False)
+
+        is_cjk_query = self._cross_lingual.is_cross_lingual(question)
+        with telemetry.stage("query_understanding"):
+            expanded_query, matched_concepts = self._cross_lingual.prepare_query(
+                question=question,
+                allow_llm_fallback=(synthesis_mode == "llm"),
+                tenant=tenant,
+            )
 
         pipeline = self._get_pipeline()
+        # Only where a model reads the chunks. The fast answer quotes one chunk and obeys nothing.
+        filter_context = guarded and (synthesis_mode == "llm" or options.multi_hop)
 
         def retrieve(search_question: str, search_text: str) -> PipelineResult:
             # Every search, on every hop, is pinned to this user's tenant and ACL tags.
-            return pipeline.run(
+            result = pipeline.run(
                 question=search_question,
                 search_text=search_text,
                 acl_tags=effective_acl_tags,
@@ -352,11 +421,19 @@ class RBACKnowledgeBaseService:
                 options=options,
                 tenant=tenant,
             )
+            if filter_context:
+                with telemetry.stage("guardrail_context"):
+                    kept, dropped = guard.filter_context(list(result.chunks))
+                if dropped:
+                    result.chunks = kept
+                    dropped_chunks.extend(dropped)
+            return result
 
         if options.multi_hop:
-            hop_result = self._multi_hop.run(
-                question, lambda step: retrieve(step, step), max_hops=options.max_hops
-            )
+            with telemetry.stage("multi_hop", max_hops=options.max_hops):
+                hop_result = self._multi_hop.run(
+                    question, lambda step: retrieve(step, step), max_hops=options.max_hops
+                )
             latest = hop_result.latest or retrieve(question, expanded_query)
             authorized_chunks = hop_result.chunks or list(latest.chunks)
             masked_docs = hop_result.masked_restricted_docs
@@ -401,24 +478,37 @@ class RBACKnowledgeBaseService:
         if options.min_relevance is not None and reranked and authorized_chunks and best < options.min_relevance:
             # Refuse before generating: nothing retrieved looks like an answer, so no LLM call.
             answer = ABSTAIN_MESSAGE
+            reason = f"The best match scored {best:.3f}, below the {options.min_relevance:.3f} threshold."
+            telemetry.note("low_relevance", reason)
             trust_report = TrustReport(
-                "abstained", [], ["relevance"], abstained=True,
-                abstain_reason=f"The best match scored {best:.3f}, below the {options.min_relevance:.3f} threshold.",
+                "abstained", [], ["relevance"], abstained=True, abstain_reason=reason
             ).to_dict()
         else:
-            answer = self._synthesizer.synthesize(
-                question=question,
-                expanded_query=search_text,
-                matched_concepts=matched_concepts,
-                is_cjk_query=is_cjk_query,
-                user_roles=cleaned_roles,
-                authorized_chunks=authorized_chunks,
-                masked_restricted_docs=masked_docs,
-                synthesis_mode=synthesis_mode,
-                **extra_args,
-            )
+            with telemetry.stage("generation", mode=synthesis_mode, chunks=len(authorized_chunks)):
+                answer = self._synthesizer.synthesize(
+                    question=question,
+                    expanded_query=search_text,
+                    matched_concepts=matched_concepts,
+                    is_cjk_query=is_cjk_query,
+                    user_roles=cleaned_roles,
+                    authorized_chunks=authorized_chunks,
+                    masked_restricted_docs=masked_docs,
+                    synthesis_mode=synthesis_mode,
+                    **extra_args,
+                )
             if options.verify:
-                trust_report, answer = self._verify_answer(answer, options)
+                with telemetry.stage("verification"):
+                    trust_report, answer = self._verify_answer(answer, options)
+
+        conflicts = detect_conflicts(authorized_chunks)
+        if guarded:
+            with telemetry.stage("guardrail_output"):
+                checked = guard.check_output(answer)
+                answer = checked.answer
+                if checked.blocked:
+                    telemetry.note("blocked_output", checked.guardrail)
+                # The answer is one of four places in this response that carry document text.
+                authorized_chunks, trace, conflicts = guard.redact_sources([authorized_chunks, trace, conflicts])
 
         return {
             "question": question,
@@ -432,10 +522,11 @@ class RBACKnowledgeBaseService:
             "authorized_chunks": authorized_chunks,
             "masked_restricted_docs": masked_docs,
             "es_query_dsl": latest.query_dsl,
-            "conflicts": detect_conflicts(authorized_chunks),
+            "conflicts": conflicts,
             "retrieval_trace": trace,
             "trust_report": trust_report,
             "answer": answer,
+            "guardrails": guardrail_report,
         }
 
     def _verify_answer(self, answer: str, options: PipelineOptions) -> tuple[Dict[str, Any], str]:
@@ -474,9 +565,10 @@ def get_kb_service() -> RBACKnowledgeBaseService:
         from src.rag.auth import auth_mode
 
         service = RBACKnowledgeBaseService()
-        if auth_mode() == "demo":
-            service.reindex_all_sample_pdfs()
-        else:
-            service._index_manager.ensure_index()
+        with telemetry.stage("startup", mode=auth_mode()):
+            if auth_mode() == "demo":
+                service.reindex_all_sample_pdfs()
+            else:
+                service._index_manager.ensure_index()
         _KB_SERVICE_INSTANCE = service
     return _KB_SERVICE_INSTANCE
