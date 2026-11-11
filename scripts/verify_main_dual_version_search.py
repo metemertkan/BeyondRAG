@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run an actual HybridRetriever search against **main** (Ep1) code.
+"""Run an actual HybridRetriever search against the Episode 1 code (commit 2fb66da).
 
 Ingests policy_v1 + policy_v2 PDFs with main's PdfIngestor (no soft supersede),
 then runs HybridRetriever.search for a cash-buffer query. Prints JSON with
@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "pdfs"
 V1 = FIXTURES / "policy_v1_liquidity_table.pdf"
 V2 = FIXTURES / "policy_v2_liquidity_table.pdf"
+EP1_COMMIT = "2fb66da"
 
 
 def main() -> int:
@@ -31,8 +32,9 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="beyondrag-main-wt-") as td:
         wt = Path(td) / "main"
-        # Detached worktree of origin/main (or local main).
-        ref = "main"
+        # The last Episode 1 commit. This used to check out `main`, which stopped being
+        # Episode 1 code long ago and broke once search required a tenant (Episode 5).
+        ref = EP1_COMMIT
         r = subprocess.run(
             ["git", "worktree", "add", "--detach", str(wt), ref],
             cwd=str(ROOT),
@@ -87,7 +89,7 @@ all_blob = "\\n".join(c.get("content", "") for c in es.memory_chunks)
 import json
 print(json.dumps({{
     "ok": True,
-    "branch_ref": "main",
+    "branch_ref": {EP1_COMMIT!r},
     "doc_ids": [m1["doc_id"], m2["doc_id"]],
     "statuses": [m1.get("status"), m2.get("status")],
     "hit_count": len(outcome.authorized_chunks),

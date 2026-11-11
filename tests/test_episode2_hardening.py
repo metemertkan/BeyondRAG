@@ -85,9 +85,10 @@ def test_ep1_baseline_without_shared_source_key_both_versions_stay_searchable():
 
 
 def test_main_branch_search_query_returns_both_cash_buffer_markers():
-    """Claim-matrix R3: actual HybridRetriever.search on **main** (Ep1) code.
+    """Claim-matrix R3: actual HybridRetriever.search on the Episode 1 code.
 
-    Uses ``scripts/verify_main_dual_version_search.py`` (git worktree of ``main``).
+    Uses ``scripts/verify_main_dual_version_search.py`` (git worktree of the last
+    Episode 1 commit; ``main`` itself has moved on).
     Observed: cash-buffer search authorized hits contain both ``450,000,000`` and
     ``520,000,000`` when v1+v2 are ingested without soft supersede.
     """
@@ -110,7 +111,7 @@ def test_main_branch_search_query_returns_both_cash_buffer_markers():
     )
     payload = json.loads(proc.stdout.strip().splitlines()[-1])
     assert payload.get("ok") is True
-    assert payload.get("branch_ref") == "main"
+    assert payload.get("branch_ref") == "2fb66da"
     assert payload.get("search_has_450") is True
     assert payload.get("search_has_520") is True
     assert payload.get("hit_count", 0) >= 1
