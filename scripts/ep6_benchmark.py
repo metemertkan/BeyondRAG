@@ -829,7 +829,7 @@ def main() -> None:
 
     args.out.mkdir(parents=True, exist_ok=True)
     bench = Bench(args)
-    if bench.seeding:
+    if bench.seeding and not bench.seeding.get("reused"):
         (args.out / "seeding.json").write_text(json.dumps(bench.seeding, indent=2) + "\n")
         print("seeding:", bench.seeding, flush=True)
     for name in [s.strip() for s in args.sections.split(",") if s.strip()]:

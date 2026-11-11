@@ -22,7 +22,7 @@ from typing import Any, Callable, Dict, Final, List, Optional, Protocol, Tuple
 
 import httpx
 
-from src.config import OLLAMA_BASE_URL, WORKSPACE_DIR, _detect_host_ollama_models, get_llm
+from src.config import OLLAMA_BASE_URL, WORKSPACE_DIR, _detect_host_ollama_models, get_llm, llm_timeout_seconds
 from src.rag import telemetry
 from src.rag.language_packs import (
     LanguagePack,
@@ -419,7 +419,8 @@ def extract_concepts_at_ingestion(
 
     extracted_concepts: List[Dict[str, Any]] = []
     try:
-        with httpx.Client(timeout=180.0) as client:
+        # The same limit as the chat model. On a CPU a long document can need more than 180 s.
+        with httpx.Client(timeout=llm_timeout_seconds()) as client:
             # A direct HTTP call. No LangChain callback sees it, so it reports itself.
             with telemetry.llm_call(model_name, "ollama", temperature=0.0, max_tokens=480) as call:
                 resp = client.post(f"{OLLAMA_BASE_URL.rstrip('/')}/api/chat", json=payload)
