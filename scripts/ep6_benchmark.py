@@ -405,21 +405,29 @@ def run_tokens(bench: Bench) -> Dict[str, Any]:
 # --- guardrails -------------------------------------------------------------------------
 
 
-def fetch_deepset() -> List[Dict[str, Any]]:
+def fetch_deepset(cache: Path) -> List[Dict[str, Any]]:
+    """The public test split, downloaded once into the benchmark workspace. Not committed."""
     import httpx
 
+    if cache.exists():
+        return json.loads(cache.read_text(encoding="utf-8"))
     rows: List[Dict[str, Any]] = []
     offset = 0
     while True:
-        response = httpx.get(
-            "https://datasets-server.huggingface.co/rows",
-            params={"dataset": "deepset/prompt-injections", "config": "default", "split": "test", "offset": offset, "length": 100},
-            timeout=60,
-        )
+        for attempt in range(5):
+            response = httpx.get(
+                "https://datasets-server.huggingface.co/rows",
+                params={"dataset": "deepset/prompt-injections", "config": "default", "split": "test", "offset": offset, "length": 100},
+                timeout=60,
+            )
+            if response.status_code < 500:
+                break
+            time.sleep(2 ** attempt)
         response.raise_for_status()
         page = [item["row"] for item in response.json()["rows"]]
         rows += page
         if len(page) < 100:
+            cache.write_text(json.dumps(rows), encoding="utf-8")
             return rows
         offset += 100
 
@@ -466,7 +474,7 @@ def run_guardrails(bench: Bench) -> Dict[str, Any]:
     judges = [m for m in bench.args.judges.split(",") if m]
     datasets = {
         "labelled": [{"text": t, "label": label} for t, label in fq.GUARDRAIL_SET],
-        "deepset_test": [{"text": r["text"], "label": "attack" if r["label"] == 1 else "benign", "lang": language_guess(r["text"])} for r in fetch_deepset()],
+        "deepset_test": [{"text": r["text"], "label": "attack" if r["label"] == 1 else "benign", "lang": language_guess(r["text"])} for r in fetch_deepset(bench.args.workspace / "deepset_test.json")],
     }
     for name, rows in datasets.items():
         for row in rows:
