@@ -128,6 +128,10 @@ class DocumentRepositoryPort(Protocol):
     def delete_document(self, doc_id: str, *, tenant: str | None = None) -> Dict[str, Any]:
         ...
 
+    def forget_all_documents(self) -> int:
+        """Drop every registry entry, saved copy and table. Call after the index was reset."""
+        ...
+
 
 class DocumentRegistryPort(Protocol):
     """Durable document registry for lifecycle + version tracking."""

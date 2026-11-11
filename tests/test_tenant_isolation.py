@@ -33,6 +33,7 @@ from src.rag.pipeline import PipelineOptions
 from src.rag.profiles import IndexTenantStrategy
 from src.rag.repository import DocumentRepository
 from src.rag.retriever import HybridRetriever
+from src.rag.seeding import DEMO_TENANT_SAMPLES, DemoDocumentSeeder
 from src.rag.service import RBACKnowledgeBaseService
 from src.rag.synthesizer import GroundedAnswerSynthesizer
 from src.rag.tabular_store import TableQuery, TabularStore
@@ -497,6 +498,37 @@ def test_registry_reloads_each_document_into_its_tenant(two_tenants: SimpleNames
     assert reloaded.tenant_of(two_tenants.acme_finance["doc_id"]) == "acme"
     assert reloaded.tenant_of(two_tenants.globex_finance["doc_id"]) == "globex"
     assert reloaded.get_current_doc_id(two_tenants.acme_finance["source_key"], "globex") is None
+
+
+def test_a_demo_restart_reseeds_the_samples_and_forgets_what_the_reset_removed(stack: SimpleNamespace, tmp_path: Path):
+    """Demo mode empties the index at every start. The registry on disk has to go with it.
+
+    It used to survive, so after the first start the seeder found every sample file "already
+    loaded", skipped it, and the app came up with documents in the list and nothing to search.
+    """
+    samples = sum(len(files) for files in DEMO_TENANT_SAMPLES.values())
+    stack.service._seeder = DemoDocumentSeeder()
+    assert len(stack.service.reindex_all_sample_pdfs()) == samples
+    upload = stack.service.ingest_pdf_bytes("note.md", b"An Acme note uploaded after the start.", tenant="acme")
+    erasure = _erasure(stack, tmp_path)
+    erasure.execute(erasure.plan_source(upload["source_key"], tenant="acme"))
+    kept = stack.service.ingest_pdf_bytes("memo.md", b"An Acme memo uploaded after the start.", tenant="acme")
+
+    # A restart: a new process reads the registry from disk, then resets the index and seeds.
+    restarted = _build(tmp_path, stack.manager, stack.embedder)
+    restarted.service._seeder = DemoDocumentSeeder()
+    assert restarted.repository.get_document_state(kept["doc_id"]) is not None
+    assert len(restarted.service.reindex_all_sample_pdfs()) == samples
+
+    assert {record["tenant"] for record in restarted.manager.memory_chunks} == set(DEMO_TENANT_SAMPLES)
+    assert "EUR 61,000,000" in _texts(_ask(restarted, "globex", ["finance"], "Project Nightjar acquisition budget"))
+    assert "EUR 61,000,000" not in _texts(_ask(restarted, "acme", ["finance"], "Project Nightjar acquisition budget"))
+    # The memo's chunks went with the index, so it is not listed and its saved copy is gone.
+    assert "memo.md" not in {doc["filename"] for doc in restarted.service.list_documents(tenant="acme")}
+    assert not list((tmp_path / "uploads").glob(f"{kept['doc_id']}_*"))
+    # An erasure outlives the reset: the erased source still cannot come back.
+    with pytest.raises(ErasedSourceError):
+        restarted.service.ingest_pdf_bytes("note.md", b"An Acme note uploaded after the start.", tenant="acme")
 
 
 # --- The HTTP API ----------------------------------------------------------------------

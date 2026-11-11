@@ -311,6 +311,9 @@ class RBACKnowledgeBaseService:
 
     def reindex_all_sample_pdfs(self) -> List[Dict[str, Any]]:
         self._index_manager.reset_index()
+        # The registry is on disk and outlives the index. Left alone, it still lists the
+        # samples, the seeder skips them as already loaded, and nothing can be searched.
+        self._repository.forget_all_documents()
         return self.seed_sample_pdfs()
 
     def query_and_chat(

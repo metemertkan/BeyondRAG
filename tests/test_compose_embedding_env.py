@@ -37,6 +37,18 @@ def test_docker_compose_forwards_rag_embedding_env_vars():
         )
 
 
+def test_docker_compose_does_not_take_the_ollama_address_from_env():
+    """`.env` sets OLLAMA_BASE_URL to localhost for runs on the host. In the container that
+    address is the container itself, so the app service must not interpolate it."""
+    text = COMPOSE.read_text(encoding="utf-8")
+    start = text.index("beyondrag-app:")
+    app_block = text[start:text.index("\n  elasticsearch:", start)]
+    line = next(l for l in app_block.splitlines() if l.strip().startswith("- OLLAMA_BASE_URL="))
+    assert "${OLLAMA_BASE_URL" not in app_block
+    assert "host.docker.internal:11434" in line
+    assert "OLLAMA_DOCKER_BASE_URL" in ENV_EXAMPLE.read_text(encoding="utf-8")
+
+
 def test_env_example_documents_rag_embedding_vars():
     text = ENV_EXAMPLE.read_text(encoding="utf-8")
     for key in REQUIRED_KEYS:
