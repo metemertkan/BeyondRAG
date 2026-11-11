@@ -216,7 +216,7 @@ def setup_telemetry(*, span_processors: Sequence[Any] = (), metric_readers: Sequ
         from opentelemetry.sdk.trace import TracerProvider
 
         resource = Resource.create({"service.name": os.getenv("OTEL_SERVICE_NAME", "beyondrag")})
-        tracer_provider = TracerProvider(resource=resource)
+        tracer_provider = TracerProvider(resource=resource, sampler=_sampler())
         for processor in span_processors:
             tracer_provider.add_span_processor(processor)
         readers = list(metric_readers)
@@ -251,6 +251,27 @@ def setup_telemetry(*, span_processors: Sequence[Any] = (), metric_readers: Sequ
         metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=readers))
         _SETUP_DONE = True
         return True
+
+
+def _sampler() -> Any:
+    """A span with no parent is kept only if it is an HTTP request, a stage or a model call.
+
+    The health check pings Elasticsearch every few seconds, and the Elasticsearch client
+    traces each ping as a trace of its own (an INTERNAL span named "ping"). Without this,
+    those pings were most of what Tempo held. Anything inside a kept trace is kept.
+    """
+    from opentelemetry.sdk.trace.sampling import ALWAYS_ON, Decision, ParentBased, Sampler, SamplingResult
+
+    class _RootsThatMatter(Sampler):
+        def should_sample(self, parent_context, trace_id, name, kind=None, attributes=None, links=None, trace_state=None):
+            if kind != SpanKind.SERVER and not name.startswith(("rag.", "chat ", "embeddings ")):
+                return SamplingResult(Decision.DROP)
+            return ALWAYS_ON.should_sample(parent_context, trace_id, name, kind, attributes, links, trace_state)
+
+        def get_description(self) -> str:
+            return "RootsThatMatter"
+
+    return ParentBased(root=_RootsThatMatter())
 
 
 def _sdk_disabled() -> bool:

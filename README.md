@@ -475,7 +475,7 @@ The image is `grafana/otel-lgtm`, a development image: one container, anonymous 
 | Condition | HTTP 200 | Outcome label | Time per answer |
 | :--- | :---: | :--- | :---: |
 | Healthy | 4 of 4 | `answered` 4 | 33 to 60 s |
-| Ollama down | 4 of 4 | `degraded_llm_fallback` 4 | 0.1 s |
+| Ollama down | 4 of 4 | `degraded_llm_fallback` 4 | 0.1 to 2.2 s |
 | `OLLAMA_MODEL` names a model that is not installed | 4 of 4 | `answered` 4 before the fix, `degraded_model_substituted` 4 after | 5 to 8 s |
 | Model server hangs, 20 s timeout | 2 of 2 | `degraded_llm_fallback` 2 | 22 s |
 | Model server hangs, no timeout (the code before this episode) | | still waiting at 120 s | |
@@ -540,6 +540,8 @@ The check runs before a request, so the fourth request finished and went 136 tok
 - **Guardrails are not access control.** What a user can read is decided by the tenant and role filters inside the search. A guardrail that is bypassed exposes nothing those filters did not already allow.
 - **Tenant is a metric label.** Fine for tens of tenants, not for tens of thousands. The tenant name also stays in Prometheus, Tempo and Loki after offboarding, until their retention removes it; offboarding clears only the local token ledger.
 - **The token budget is checked before a request,** so the request that crosses it completes. The ledger is one JSON file in one process: two replicas would each keep their own count.
+- **Masking is a pattern, not a judgement.** It also masks the IT help desk's e-mail address in the public handbook, which nobody needs hidden.
+- **Health checks are not traced.** The Elasticsearch client traced every health-check ping as a trace of its own, and those were most of what Tempo held. A span with no parent is now kept only if it is an HTTP request, a pipeline stage or a model call.
 - **Prompts are not captured by default.** With capture on, they are masked, but masking only covers the kinds listed above. A name in a prompt is stored as written.
 - **The Grafana image is for development.** Anonymous admin, no persistence, no TLS.
 - **Prometheus undercounts short-lived series.** `increase()` drops the first increment of every new counter series, and each process start is a new series. My first dashboard showed 73 questions where 93 had been asked. The question counts and shares now come from the one log line per question in Loki, which is exact; the Prometheus panels are a floor.

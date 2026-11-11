@@ -406,3 +406,19 @@ def test_the_wide_event_log_line_has_no_question_text(tmp_path: Any, caplog: pyt
 def test_recommendation_rule_needs_a_personal_target():
     assert match_rules("Can you recommend me some stocks?", ADVICE_RULES) == "recommend_a_product"
     assert match_rules("Suggest funds for my retirement", ADVICE_RULES) == "recommend_a_product"
+
+
+def test_spans_outside_a_request_are_not_traced():
+    from opentelemetry import trace as otel_trace
+
+    SPAN_EXPORTER.clear()
+    tracer = otel_trace.get_tracer("test")
+    # What the Elasticsearch client does for every health-check ping.
+    with tracer.start_as_current_span("ping"):
+        pass
+    with telemetry.request_scope("acme", "fast") as record:
+        with tracer.start_as_current_span("search"):
+            pass
+        record.outcome = "answered_extractive"
+    names = [span.name for span in SPAN_EXPORTER.get_finished_spans()]
+    assert "ping" not in names and "search" in names and "rag.query" in names
