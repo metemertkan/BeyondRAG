@@ -655,6 +655,23 @@ class DocumentRepository:
             self._current_by_source_key.pop((scope, key), None)
         self._persist_registry()
 
+    def forget_all_documents(self) -> int:
+        """Empty the registry after the index was reset, so the two agree again.
+
+        Every listed document has just lost its chunks, so its saved copy and its tables go
+        too. Tombstones and processed source events stay: an erasure outlives a reset.
+        """
+        reports = list(self._doc_states.values())
+        for report in reports:
+            self.delete_upload_file(report.doc_id)
+        for scope in {normalize_tenant(report.tenant) for report in reports}:
+            self.tabular_store.delete_tenant(scope)
+        self._doc_states = {}
+        self._current_by_source_key = {}
+        self._index_embedding_manifest = None
+        self._persist_registry()
+        return len(reports)
+
     def archive_source(self, source_key: str, *, tenant: str | None = None) -> int:
         """Source-system archive: retain every version, remove them all from retrieval."""
         scope = normalize_tenant(tenant)

@@ -16,7 +16,9 @@ from langchain_ollama import ChatOllama
 load_dotenv()
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
-WORKSPACE_DIR: Final[Path] = PROJECT_ROOT / "workspace"
+# RAG_WORKSPACE_DIR moves the registry, uploads and other state. The tests point it at a
+# temporary folder, so a test run cannot touch a running app's state.
+WORKSPACE_DIR: Final[Path] = Path(os.getenv("RAG_WORKSPACE_DIR", "").strip() or PROJECT_ROOT / "workspace")
 WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
 
 GOOGLE_API_KEY: Final[str] = os.getenv("GOOGLE_API_KEY", "").strip()

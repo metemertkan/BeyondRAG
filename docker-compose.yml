@@ -13,7 +13,10 @@ services:
       - WEB_HOST=${WEB_HOST:-0.0.0.0}
       - WEB_PORT=${WEB_PORT:-8090}
       - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      # Not taken from OLLAMA_BASE_URL in `.env`: that one is `localhost` for runs on the
+      # host, and inside the container `localhost` is the container. Set
+      # OLLAMA_DOCKER_BASE_URL to point the container at another Ollama.
+      - OLLAMA_BASE_URL=${OLLAMA_DOCKER_BASE_URL:-http://host.docker.internal:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:1.5b}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - USE_LOCAL_ONLY=${USE_LOCAL_ONLY:-false}
