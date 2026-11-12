@@ -418,3 +418,18 @@ def test_an_index_reset_keeps_embeddings_but_drops_answers(fresh_store: MemorySt
     cache.store_answer(_ctx(cache, "q"), {"answer": "a", "authorized_chunks": []}, {})
     cache.on_change("acme", "reset", ["doc1"])
     assert not fresh_store.keys("*:ans:acme:*")
+
+
+
+def test_ingestion_keeps_the_vectors_it_just_cached(tmp_path: Any, fresh_store: MemoryStore):
+    """The ingestor clears a document's old chunks before writing it; that must not purge its cache."""
+    service = _service(tmp_path, _fake_model("unused"))
+    assert fresh_store.keys("*:emb-owner:default:*") and fresh_store.keys("*:emb:*")
+    provider_calls: List[int] = []
+    inner = service._embedder._inner
+    original = inner.embed_batch
+    inner.embed_batch = lambda texts, **kw: (provider_calls.append(len(texts)), original(texts, **kw))[1]
+    service._index_manager.reset_index()
+    service._repository.forget_all_documents()
+    service.ingest_pdf_bytes("policy.md", b"Employees must rotate their network password every 180 days.", source_key="policy")
+    assert provider_calls == []  # the rebuild embedded nothing again

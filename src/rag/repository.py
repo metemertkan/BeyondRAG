@@ -473,8 +473,12 @@ class DocumentRepository:
         self._persist_registry()
         self._notify(report.tenant, "write", [report.doc_id, prev_id or ""])
 
-    def delete_chunks(self, doc_id: str, *, tenant: str | None = None) -> None:
-        """Remove a document's indexed chunks without deleting the uploaded file."""
+    def delete_chunks(self, doc_id: str, *, tenant: str | None = None, reason: str = "remove") -> None:
+        """Remove a document's indexed chunks without deleting the uploaded file.
+
+        ``reason="replace"`` is ingestion clearing the old chunks of a document it is about to
+        write again: announced as a write, so caches don't throw away what ingestion just cached.
+        """
         scope = self._scope_for_doc(doc_id, tenant)
         if self.es_manager.is_online():
             self.es_manager.client.delete_by_query(
@@ -485,7 +489,7 @@ class DocumentRepository:
         self.es_manager.memory_chunks = [
             c for c in self.es_manager.memory_chunks if not (c.get("doc_id") == doc_id and self._in_scope(c, scope))
         ]
-        self._notify(scope, "remove", [doc_id])
+        self._notify(scope, "write" if reason == "replace" else "remove", [doc_id])
 
     def delete_document(self, doc_id: str, *, tenant: str | None = None) -> Dict[str, Any]:
         """Remove a document's indexed chunks and its saved upload file."""

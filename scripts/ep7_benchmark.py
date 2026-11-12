@@ -110,7 +110,15 @@ def contains(answer: str, expected: Optional[str]) -> bool:
 
 def abstained(answer: str) -> bool:
     text = answer.casefold()
-    return any(marker in text for marker in ("not_found", "don't contain", "do not contain", "no matching documents", "can't find", "cannot find", "not stated", "doesn't say", "not in the"))
+    text = text.replace("’", "'")
+    return any(marker in text for marker in (
+        "not_found", "couldn't find", "could not find", "can't find", "cannot find", "no matching documents",
+        "don't contain", "do not contain", "doesn't contain", "does not contain", "not stated", "doesn't say", "does not say",
+        "not mentioned", "isn't mentioned", "don't mention", "do not mention", "doesn't mention", "does not mention",
+        "not specified", "don't specify", "do not specify", "doesn't specify", "does not specify", "no information",
+        "not provided", "don't provide", "do not provide", "doesn't provide", "does not provide", "not in the",
+        "access blocked",
+    ))
 
 
 def correct(answer: str, expected: Optional[str]) -> bool:
@@ -202,7 +210,10 @@ class Bench:
         path = self.args.out / "answers.json"
         if not path.exists():
             raise SystemExit("Run the 'answers' section first.")
-        return {row["q"]: row for row in json.loads(path.read_text())["rows"]}
+        rows = json.loads(path.read_text())["rows"]
+        for row in rows:  # Scored again on load, so a fix to the scoring needs no new model calls.
+            row["correct"] = correct(row["answer"], row["expected"])
+        return {row["q"]: row for row in rows}
 
 
 def with_env(**values: str) -> Callable[[Callable[[], Any]], Any]:
@@ -250,7 +261,13 @@ def run_embeddings(bench: Bench) -> Dict[str, Any]:
     from src.rag.seeding import DEMO_TENANT_SAMPLES, create_pdf_bytes
 
     service = bench.service
-    docs = json.loads((ROOT / "config" / "ep3_demo_docs.json").read_text())[: bench.args.lab_docs]
+    lab = json.loads((ROOT / "config" / "ep3_demo_docs.json").read_text())[: bench.args.lab_docs]
+    # The lab documents are one chunk each, which leaves batching nothing to batch. Grouped
+    # eight to a file, each file is several chunks, like a real policy document.
+    docs = [
+        {"filename": f"lab_group_{i // 8:02d}.md", "text": "\n\n".join(d["text"] for d in lab[i : i + 8]), "tags": []}
+        for i in range(0, len(lab), 8)
+    ]
     embedder = service._embedder
     assert isinstance(embedder, CachingEmbedder)
 
@@ -297,7 +314,7 @@ def run_embeddings(bench: Bench) -> Dict[str, Any]:
     revision = {"chunks_in_v2": len(chunks_v2), "embedding_calls_v1": len(first), "embedding_calls_v2": len(second),
                 "texts_embedded_v2": sum(int(s.attributes.get("gen_ai.usage.input_tokens", 0)) > 0 for s in second)}
 
-    return {"documents": len(docs), "arms": arms, "revision": revision,
+    return {"documents": len(docs), "source_documents": len(lab), "arms": arms, "revision": revision,
             "note": "Concept extraction is off here, so only embedding costs are compared."}
 
 
@@ -829,9 +846,15 @@ def traffic(n: int, zipf_s: float, seed: int, variant_mix: Dict[str, float]) -> 
 def run_workload(bench: Bench) -> Dict[str, Any]:
     from src.rag.answer_cache import guard_allows, normalize_question
 
+    import numpy as np
+
     answers = bench.answers()
     embed = bench.service._embedder.embed
-    vectors = {q: embed(q) for q in answers}
+    names = list(answers)
+    matrix = np.asarray([embed(q) for q in names], dtype=np.float64)
+    matrix /= np.linalg.norm(matrix, axis=1, keepdims=True)
+    index = {q: i for i, q in enumerate(names)}
+    sims = matrix @ matrix.T
     mix = {"base": 0.5, "paraphrase": 0.4, "near_miss": 0.1}
     policies = {"none": None, "exact": ("exact", 1.0, False)}
     for t in bench.args.thresholds:
@@ -860,7 +883,7 @@ def run_workload(bench: Bench) -> Dict[str, Any]:
                         for (tenant, _), entry in cache.items():
                             if tenant != req["tenant"]:
                                 continue
-                            sim = cosine(vectors[req["q"]], vectors[entry["q"]])
+                            sim = float(sims[index[req["q"]], index[entry["q"]]])
                             if sim >= best_sim and (not policy[2] or guard_allows(req["q"], entry["q"])[0]):
                                 best, best_sim = entry, sim
                         served = best

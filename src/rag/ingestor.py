@@ -16,6 +16,7 @@ Guarantees:
 
 from __future__ import annotations
 
+import inspect
 import os
 
 import hashlib
@@ -449,7 +450,13 @@ class PdfIngestor:
             )
 
             if hasattr(self._repository, "delete_chunks"):
-                self._repository.delete_chunks(assigned_doc_id, tenant=tenant_norm)
+                # A replace, not a removal: caches keep the vectors this ingestion just made.
+                replace_kw = (
+                    {"reason": "replace"}
+                    if "reason" in inspect.signature(self._repository.delete_chunks).parameters
+                    else {}
+                )
+                self._repository.delete_chunks(assigned_doc_id, tenant=tenant_norm, **replace_kw)
             else:
                 self._repository.delete_document(assigned_doc_id, tenant=tenant_norm)
             self._repository.save_chunks(chunk_records)
