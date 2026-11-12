@@ -30,7 +30,7 @@ import json
 import logging
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, Final, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Final, Iterable, List, Optional, Sequence, Tuple
 
 from elasticsearch.helpers import bulk
 
@@ -82,6 +82,10 @@ class DocumentRepository:
         self._current_by_source_key: Dict[Tuple[str, str], str] = {}
         self._index_embedding_manifest: Optional[str] = None
         self.tabular_store = tabular_store or TabularStore()
+        # Called with (tenant, kind, doc_ids) after every change: kind is "write", "remove"
+        # (deleted or erased) or "reset" (the index is being rebuilt from the same sources).
+        # Caches listen here, so no write path can forget to invalidate them.
+        self.change_listeners: List[Callable[[str, str, List[str]], None]] = []
         self._erasure_key_path = erasure_key_path or self.registry_path.parent / DEFAULT_ERASURE_KEY_PATH.name
         self._erasure_key: Optional[bytes] = None
         # Tombstones hold keyed hashes only and outlive the data they refer to.
@@ -136,6 +140,14 @@ class DocumentRepository:
         tmp_path = self.registry_path.with_suffix(".tmp")
         tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp_path.replace(self.registry_path)
+
+    def _notify(self, tenant: str | None, kind: str, doc_ids: Iterable[str]) -> None:
+        ids = sorted({str(doc_id) for doc_id in doc_ids if doc_id})
+        for listener in list(self.change_listeners):
+            try:
+                listener(normalize_tenant(tenant), kind, ids)
+            except Exception as exc:  # A cache must never fail a write. Logged, and the cache is suspect.
+                logger.error("Cache invalidation failed for tenant %s: %s", tenant, exc)
 
     def _current_by_tenant(self) -> Dict[str, Dict[str, str]]:
         nested: Dict[str, Dict[str, str]] = {}
@@ -194,6 +206,7 @@ class DocumentRepository:
         self._doc_states[doc_id] = superseded
         self._set_chunks_current(doc_id, is_current=False, status=IngestionState.SUPERSEDED.value)
         self._persist_registry()
+        self._notify(existing.tenant, "write", [doc_id])
 
     def get_index_embedding_manifest(self) -> Optional[str]:
         return self._index_embedding_manifest
@@ -297,6 +310,8 @@ class DocumentRepository:
                 c for c in self.es_manager.memory_chunks if c.get("chunk_id") not in existing_ids
             ]
             self.es_manager.memory_chunks.extend(chunks)
+        for scope in {rec["tenant"] for rec in chunks}:
+            self._notify(scope, "write", [rec.get("doc_id") for rec in chunks if rec["tenant"] == scope])
 
     def list_documents(self, *, tenant: str, include_superseded: bool = True) -> List[Dict[str, Any]]:
         """Return one tenant's documents from the durable registry (preferred) or indexed chunks.
@@ -423,6 +438,7 @@ class DocumentRepository:
                 replace(existing, is_public=is_public, tags=extract_visible_tags(acl_tags), acl_tags=acl_tags)
             )
         self.tabular_store.update_acl(doc_id, acl_tags, tenant=scope)
+        self._notify(scope, "write", [doc_id])
 
     def publish_new_current(
         self,
@@ -455,9 +471,14 @@ class DocumentRepository:
             report.doc_id, is_current=True, status=IngestionState.INDEXED.value
         )
         self._persist_registry()
+        self._notify(report.tenant, "write", [report.doc_id, prev_id or ""])
 
-    def delete_chunks(self, doc_id: str, *, tenant: str | None = None) -> None:
-        """Remove a document's indexed chunks without deleting the uploaded file."""
+    def delete_chunks(self, doc_id: str, *, tenant: str | None = None, reason: str = "remove") -> None:
+        """Remove a document's indexed chunks without deleting the uploaded file.
+
+        ``reason="replace"`` is ingestion clearing the old chunks of a document it is about to
+        write again: announced as a write, so caches don't throw away what ingestion just cached.
+        """
         scope = self._scope_for_doc(doc_id, tenant)
         if self.es_manager.is_online():
             self.es_manager.client.delete_by_query(
@@ -468,6 +489,7 @@ class DocumentRepository:
         self.es_manager.memory_chunks = [
             c for c in self.es_manager.memory_chunks if not (c.get("doc_id") == doc_id and self._in_scope(c, scope))
         ]
+        self._notify(scope, "write" if reason == "replace" else "remove", [doc_id])
 
     def delete_document(self, doc_id: str, *, tenant: str | None = None) -> Dict[str, Any]:
         """Remove a document's indexed chunks and its saved upload file."""
@@ -601,6 +623,8 @@ class DocumentRepository:
         """Delete by lineage, not doc_id, so orphans missing from the registry go too."""
         scope = normalize_tenant(tenant)
         removed = 0
+        # Collected now, announced after the delete: a request in between must not refill a cache.
+        affected = [report.doc_id for report in self.versions_for_sources(source_keys, tenant=scope)]
         if self.es_manager.is_online():
             resp = self.es_manager.client.delete_by_query(
                 index=self.es_manager.ensure_index(scope),
@@ -613,6 +637,7 @@ class DocumentRepository:
         self.es_manager.memory_chunks = [
             rec for rec in self.es_manager.memory_chunks if not self._memory_matches(rec, source_keys, subject_id, scope)
         ]
+        self._notify(scope, "remove", affected)
         return removed + before - len(self.es_manager.memory_chunks)
 
     def expunge_deleted_documents(self, *, tenant: str | None = None) -> int:
@@ -646,6 +671,7 @@ class DocumentRepository:
     def forget_registry_entries(self, source_keys: Iterable[str], *, tenant: str | None = None) -> None:
         wanted = set(source_keys)
         scope = normalize_tenant(tenant)
+        self._notify(scope, "remove", [r.doc_id for r in self.versions_for_sources(wanted, tenant=scope)])
         self._doc_states = {
             doc_id: report
             for doc_id, report in self._doc_states.items()
@@ -662,6 +688,10 @@ class DocumentRepository:
         too. Tombstones and processed source events stay: an erasure outlives a reset.
         """
         reports = list(self._doc_states.values())
+        for scope in {normalize_tenant(report.tenant) for report in reports}:
+            # A reset, not an erasure: the index is rebuilt from the same sources. Answers go;
+            # cached embeddings stay, so the rebuild doesn't pay for them again.
+            self._notify(scope, "reset", [r.doc_id for r in reports if normalize_tenant(r.tenant) == scope])
         for report in reports:
             self.delete_upload_file(report.doc_id)
         for scope in {normalize_tenant(report.tenant) for report in reports}:
@@ -681,6 +711,7 @@ class DocumentRepository:
             self._set_chunks_current(report.doc_id, is_current=False, status=IngestionState.ARCHIVED.value)
         self._current_by_source_key.pop((scope, source_key), None)
         self._persist_registry()
+        self._notify(scope, "write", [report.doc_id for report in versions])
         return len(versions)
 
     def purge_tenant(self, tenant: str) -> Dict[str, Any]:
@@ -723,6 +754,7 @@ class DocumentRepository:
             key: doc_id for key, doc_id in self._current_by_source_key.items() if key[0] != scope
         }
         self._persist_registry()
+        self._notify(scope, "remove", doc_ids)
         return {
             "tenant": scope,
             "method": method,

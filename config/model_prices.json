@@ -1,0 +1,18 @@
+{
+  "note": "Illustrative only. Nothing in BeyondRAG calls a paid API. Local models are mapped to a hosted model of a similar tier to turn tokens into a dollar estimate. Token counts come from the local model's tokenizer, which differs from the hosted one (Anthropic notes Haiku 5.5's tokenizer counts about 30% more tokens for the same text).",
+  "source": "Anthropic model pricing as listed in the Claude API reference bundled with Claude Code 2.1.318",
+  "read_on": "2026-11-12",
+  "currency": "USD",
+  "per_million_tokens": {
+    "claude-haiku-5-5": {"input": 0.10, "output": 0.50, "cache_read": 0.01, "note": "prompts up to 100K tokens; cache read assumed 0.1x input"},
+    "claude-sonnet-5-5": {"input": 2.00, "output": 10.00, "cache_read": 0.20},
+    "claude-opus-5-5": {"input": 4.00, "output": 20.00, "cache_read": 0.20}
+  },
+  "local_to_hosted": {
+    "qwen3:1.7b": "claude-haiku-5-5",
+    "qwen3:4b": "claude-haiku-5-5",
+    "qwen2.5:1.5b": "claude-haiku-5-5",
+    "qwen2.5:0.5b": "claude-haiku-5-5",
+    "qwen3:8b": "claude-sonnet-5-5"
+  }
+}

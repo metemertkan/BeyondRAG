@@ -332,6 +332,47 @@ class TokenLedger:
         return removed
 
 
+class SharedTokenLedger(TokenLedger):
+    """The same ledger in the shared cache store (Redis), so every app replica sees one count.
+
+    The keys carry no TTL, so a full Redis evicts cache entries and never these. Days older
+    than a week are deleted when a new day starts.
+    """
+
+    def __init__(self, store: Any) -> None:
+        super().__init__(None)
+        self._store = store
+        self._cleaned_day = ""
+
+    def _key(self, day: str, tenant: str, kind: str) -> str:
+        from src.rag.cache_store import cache_prefix
+
+        return f"{cache_prefix()}:ledger:{day}:{tenant}:{kind}"
+
+    def add(self, tenant: str, input_tokens: int, output_tokens: int) -> None:
+        day = self.today()
+        self._store.incrby(self._key(day, tenant, "input"), int(input_tokens))
+        self._store.incrby(self._key(day, tenant, "output"), int(output_tokens))
+        if self._cleaned_day != day:
+            self._cleaned_day = day
+            from src.rag.cache_store import cache_prefix
+
+            keep = sorted({k.split(":")[-3] for k in self._store.keys(f"{cache_prefix()}:ledger:*")})[-self._KEEP_DAYS :]
+            self._store.delete(k for k in self._store.keys(f"{cache_prefix()}:ledger:*") if k.split(":")[-3] not in keep)
+
+    def usage(self, tenant: str) -> Dict[str, int]:
+        day = self.today()
+        raw_in, raw_out = self._store.mget([self._key(day, tenant, "input"), self._key(day, tenant, "output")])
+        used_in, used_out = int(raw_in or 0), int(raw_out or 0)
+        return {"input": used_in, "output": used_out, "total": used_in + used_out}
+
+    def forget_tenant(self, tenant: str) -> int:
+        from src.rag.cache_store import cache_prefix
+
+        keys = [k for k in self._store.keys(f"{cache_prefix()}:ledger:*") if k.split(":")[-2] == tenant]
+        return self._store.delete(keys) // 2
+
+
 class GuardrailEngine:
     def __init__(
         self,
@@ -390,7 +431,7 @@ class GuardrailEngine:
             with telemetry.stage("guardrail_judge"):
                 factory = self._llm_factory or _default_llm_factory()
                 result = (
-                    factory(role="manager", temperature=0.0)
+                    factory(role="manager", temperature=0.0, task="judge")
                     .with_structured_output(_JudgeVerdict)
                     .invoke(_JUDGE_PROMPT.format(message=question[:4000]))
                 )
@@ -510,8 +551,15 @@ def get_guardrails() -> GuardrailEngine:
     if _ENGINE is None:
         from src.config import WORKSPACE_DIR
 
+        from src.rag.cache_store import get_cache_store
+
         policy = GuardrailPolicy.from_env()
-        _ENGINE = GuardrailEngine(policy, ledger=TokenLedger(WORKSPACE_DIR / "token_ledger.json" if policy.enabled else None))
+        store = get_cache_store() if policy.enabled else None
+        if store is not None and store.kind == "redis":
+            ledger: TokenLedger = SharedTokenLedger(store)  # shared by every replica (Episode 7)
+        else:
+            ledger = TokenLedger(WORKSPACE_DIR / "token_ledger.json" if policy.enabled else None)
+        _ENGINE = GuardrailEngine(policy, ledger=ledger)
     return _ENGINE
 
 

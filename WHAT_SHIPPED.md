@@ -4,6 +4,25 @@
 
 This file records the first Episode 2 increment (versioning, PDF layout, embedding contract), then the second (Excel, multilingual, semantic chunking, trust tiers, GDPR, CI evaluation) under "Ingestion challenges increment". Where the two disagree, the second is current.
 
+## Cost reduction increment (Episode 7)
+
+| Claim | Where | Test |
+| --- | --- | --- |
+| Embedding cache serves repeats, batches misses, returns the same vectors | `embedding_cache.py`, `embeddings.py` | `test_embedding_cache_serves_repeats_and_batches_misses`, `test_cached_vectors_match_uncached_ones` |
+| Embedding cache is per tenant and purged with the document | `embedding_cache.py`, `service.py` | `test_embedding_cache_is_per_tenant_and_purged_with_the_document`, `test_deleting_a_document_deletes_the_answers_built_on_it` |
+| An LLM cache hit is saved, not spent, and not charged to the budget | `llm_cache.py`, `telemetry.py` | `test_an_llm_cache_hit_is_saved_not_spent_and_not_charged_to_the_budget` |
+| Answer cache needs the same tenant, roles and corpus generation | `answer_cache.py`, `repository.py` | `test_exact_hits_need_the_same_tenant_roles_and_generation`, `test_a_new_version_of_a_source_makes_the_cached_answer_unreachable` |
+| Removals and index resets delete cached answers | `answer_cache.py`, `repository.py` | `test_a_removal_deletes_the_tenants_answers`, `test_an_index_reset_keeps_embeddings_but_drops_answers` |
+| No cached answer outlives its sources' expiry; degraded answers aren't cached | `answer_cache.py`, `service.py` | `test_an_answer_never_outlives_its_sources_expiry`, `test_degraded_answers_are_not_cached` |
+| Semantic hits respect the threshold and the guard | `answer_cache.py` | `test_semantic_hits_respect_the_threshold_and_the_guard`, `test_the_guard_rejects_near_misses` |
+| Repeated questions are answered from the cache for free, even over budget | `service.py` | `test_a_repeated_question_is_answered_from_the_cache_for_free`, `test_a_cached_answer_is_served_even_over_budget` |
+| Routing is explicit and labelled; the cascade escalates on failed checks | `routing.py`, `config.py`, `synthesizer.py` | `test_routing_is_off_unless_asked`, `test_the_cascade_*` |
+| Compression keeps the answer sentence; compact headers and verification | `synthesizer.py`, `trust.py` | `test_compression_keeps_the_sentence_with_the_answer`, `test_compact_*` |
+| Redis store and shared token ledger | `cache_store.py`, `guardrails.py` | `test_redis_store_keys_ttl_and_vector_scope` (needs Redis), `test_shared_ledger_counts_like_the_file_ledger` |
+| Costs, caches, routing and tokens measured against answer quality | `scripts/ep7_benchmark.py` | Run by hand |
+
+Not shipped: hosted prompt caching (local models only), per-entry purge of cached answers by document (a removal clears the tenant's answers), and a semantic cache that is safe without the guard.
+
 ## Observability and guardrails increment (Episode 6)
 
 | Claim | Where | Test |
