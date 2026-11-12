@@ -115,6 +115,15 @@ class RequestRecord:
     def output_tokens(self) -> int:
         return sum(call.output_tokens or 0 for call in self.llm_calls if not call.cached)
 
+    def estimated_cost_usd(self) -> float:
+        """Illustrative: local tokens priced at a hosted model of a similar tier (src/rag/pricing.py)."""
+        from src.rag.pricing import estimate_usd
+
+        return round(sum(
+            estimate_usd(call.model, call.input_tokens or 0, call.output_tokens or 0)
+            for call in self.llm_calls if not call.cached and call.operation == "chat"
+        ), 8)
+
     def saved(self) -> Dict[str, float]:
         """What the caches avoided in this request: tokens and model time, as recorded when filled."""
         input_tokens = sum(item.get("input_tokens", 0) for item in self.cache if item["hit"])
@@ -144,6 +153,7 @@ class RequestRecord:
             "cache": list(self.cache),
             "routes": list(self.routes),
             "saved": self.saved(),
+            "estimated_cost_usd": self.estimated_cost_usd(),
             "llm_calls": [
                 {
                     "stage": call.stage,
@@ -217,6 +227,9 @@ class _Instruments:
         )
         self.guardrails = meter.create_counter(
             "rag.guardrail.decisions", unit="{decision}", description="Guardrail decisions, by guardrail and action."
+        )
+        self.cost = meter.create_counter(
+            "rag.cost.estimated", unit="USD", description="Illustrative cost: local tokens at a hosted model's list price."
         )
         self.routes = meter.create_counter(
             "rag.route.decisions", unit="{call}", description="Model calls by task, tier and model."
@@ -477,6 +490,9 @@ def _finish_request(record: RequestRecord, span: trace.Span) -> None:
     }
     instruments = _instruments()
     instruments.requests.add(1, labels)
+    cost = record.estimated_cost_usd()
+    if cost:
+        instruments.cost.add(cost, {"rag.tenant": record.tenant})
     instruments.request_duration.record(record.duration_ms / 1000.0, labels)
     # One line per question with everything needed to find and explain it.
     request_logger.log(
@@ -499,6 +515,8 @@ def _finish_request(record: RequestRecord, span: trace.Span) -> None:
                 "saved_input_tokens": record.saved()["input_tokens"],
                 "saved_output_tokens": record.saved()["output_tokens"],
                 "saved_model_seconds": record.saved()["model_seconds"],
+                "estimated_cost_usd": record.estimated_cost_usd(),
+                "model_seconds": round(sum(c.duration_ms for c in record.llm_calls if not c.cached and c.operation == "chat") / 1000.0, 3),
                 "events": [item["event"] for item in record.events],
                 "guardrails": [f"{item['guardrail']}:{item['action']}" for item in record.guardrails],
                 "detail": record.detail,

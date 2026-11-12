@@ -12,6 +12,7 @@ Most RAG tutorials stop at chunking a single PDF for a single user. A company-wi
 | [**#04**](#episode-4--trustworthy-answers) | Trustworthy answers | Per-sentence citations, hallucination checks, a measured LLM checker, abstention, a trust report per answer |
 | [**#05**](#episode-5--multi-tenant-isolation) | Multi-tenant isolation | Signed identity, a required tenant scope on every read and write, pool and silo index layouts, tenant offboarding, 22 cross-tenant attacks run before and after |
 | [**#06**](#episode-6--observability-and-guardrails) | Observability and guardrails | OpenTelemetry traces and token metrics for every model call, one outcome label per answer, a local Grafana stack, business guardrails, a daily token budget per tenant |
+| [**#07**](#episode-7--reducing-llm-costs) | Reducing LLM costs | Embedding cache and batching, an answer cache scoped by tenant, roles and corpus version, a guarded semantic cache, model routing and a cascade, prompt and token optimization, measured against answer quality |
 
 ---
 
@@ -547,6 +548,46 @@ The check runs before a request, so the fourth request finished and went 136 tok
 - **Prometheus undercounts short-lived series.** `increase()` drops the first increment of every new counter series, and each process start is a new series. My first dashboard showed 73 questions where 93 had been asked. The question counts and shares now come from the one log line per question in Loki, which is exact; the Prometheus panels are a floor.
 - **LangSmith, OpenLLMetry and OpenInference** do much of the same and more. I used plain OpenTelemetry so the data goes to any backend; LangSmith was not tested.
 
+## Episode 7 — Reducing LLM Costs
+
+Episode 6 made cost visible: tokens per stage, model time per call. Episode 7 spends less of it. Every change is measured next to answer quality on the same questions, because a cheaper wrong answer is not a saving.
+
+Measurements come from [`scripts/ep7_benchmark.py`](./scripts/ep7_benchmark.py) on one CPU machine with `qwen3:1.7b`, `qwen3:4b`, `qwen3:8b` and `bge-m3` in Ollama, and Redis 8. The 30 questions, their paraphrases and their near-misses are in [`scripts/ep7_fixtures.py`](./scripts/ep7_fixtures.py). Nothing calls a paid API; dollar figures are illustrative, from the dated price table in [`config/model_prices.json`](./config/model_prices.json).
+
+Earlier episodes overlap here: the embedding manifest from [Episode 2](#episode-2--production-document-ingestion) is the embedding cache key, and its versioning, expiry and erasure decide when a cached answer must go. [Episode 4](#episode-4--trustworthy-answers)'s checks decide when the cascade escalates. [Episode 5](#episode-5--multi-tenant-isolation)'s lesson applies to every cache: a key without the tenant is a way across tenants. [Episode 6](#episode-6--observability-and-guardrails)'s telemetry would have counted a cache hit as spent tokens.
+
+### How it works
+
+- **Redis holds the caches** (`REDIS_URL`; process memory when empty). Cache entries carry a TTL, and `volatile-lru` evicts only those. The Episode 6 token ledger moves there too, without a TTL, so every app replica shares one count.
+- **Embedding cache and batching (on by default).** Keyed by the embedding manifest, the tenant and the text. A new model means new keys. Ingestion embeds chunks in batches instead of one call each. Deleting or erasing a document deletes the vectors it cached. Keys include the tenant, so one tenant can't time whether another already embedded the same text (`RAG_EMBEDDING_CACHE_SCOPE=shared` trades that for more hits).
+- **Answer cache (`RAG_ANSWER_CACHE=exact|semantic`).** The key holds the tenant, the caller's effective ACL tags, the options, the model, the prompt version, and the tenant's corpus generation. Every repository write bumps the generation; deletes and erasure delete the tenant's cached answers outright. TTL never outlives the earliest `expires_at` of the sources. Degraded answers are never cached. A cached answer costs no tokens, so it is served even over the Episode 6 budget.
+- **Semantic cache guard.** A semantic hit needs the same numbers, years, quarters, currencies, names, negations and min/max words as the cached question.
+- **LLM call cache (`RAG_LLM_CACHE=on`).** Temperature-0 calls (rewrites, HyDE, decomposition, translation, judge, verifier, table planning) through LangChain's own cache interface. A hit is counted as saved in telemetry, not spent, and isn't charged to the budget.
+- **Routing (`RAG_ROUTING=static|cascade`).** Each task has a tier: `small`, `medium`, `large` (`RAG_MODEL_*`). The cascade lets the small model answer first and pays for the large one when the Episode 4 citation and value checks fail or the small model says it can't answer. `RAG_ROUTE_EXTRACTIVE=on` skips the model for a single-fact question when the re-ranker is confident. Every routed call is labelled on its span.
+- **Token optimization.** `RAG_COMPACT_SOURCES` (short source headers; trust tier and dates only when sources conflict), `RAG_CONTEXT_BUDGET` (keep the sentences closest to the question), `RAG_ANSWER_MAX_TOKENS`, and `RAG_VERIFY_COMPACT` (the LLM verifier only checks sentences the value check couldn't settle).
+- **Prompt layout.** Static first, per-user and per-question last, so Ollama can reuse the work on a shared prefix.
+
+### Try it
+
+```bash
+docker compose up -d --build        # now with Redis
+# .env
+RAG_ANSWER_CACHE=exact
+RAG_LLM_CACHE=on
+RAG_ROUTING=cascade
+RAG_VERIFY_COMPACT=on
+```
+
+Ask the same question twice: the second response has `"cache": {"layer": "answer_exact", ...}` and `telemetry.outcome` is `answered_cached`, with `telemetry.saved` showing the tokens and model time it avoided.
+
+### Results
+
+EP7_RESULTS
+
+### Limits worth knowing
+
+EP7_LIMITS
+
 ---
 
 ## Repository Structure
@@ -593,7 +634,13 @@ BeyondRAG/
 │   │   ├── auth.py           # 26. Signed bearer tokens: mint, verify, demo and required modes
 │   │   ├── telemetry.py      # 27. OpenTelemetry spans, GenAI token metrics, outcome labels, LangChain callback
 │   │   ├── guardrails.py     # 28. Business guardrails and the per-tenant token ledger
-│   │   └── pii.py            # 29. Personal data detection with checksums
+│   │   ├── pii.py            # 29. Personal data detection with checksums
+│   │   ├── cache_store.py    # 30. Redis or in-memory store for every cache
+│   │   ├── embedding_cache.py # 31. Content-addressed embedding cache
+│   │   ├── answer_cache.py   # 32. Exact and semantic answer cache, scoped and invalidated
+│   │   ├── llm_cache.py      # 33. LangChain cache for temperature-0 model calls
+│   │   ├── routing.py        # 34. Model tiers per task, the cascade, extractive-first
+│   │   └── pricing.py        # 35. Illustrative dollar estimate from a dated price table
 │   ├── eval/                 # Golden-dataset harness and LLM-as-a-judge metrics
 │   └── web/
 │       ├── app.py            # REST API (/api/upload, /api/documents, /api/chat, /api/erasure, /api/sync/events, /api/tenants/{tenant}/offboard)
@@ -663,6 +710,20 @@ BeyondRAG/
 | `RAG_GUARD_JUDGE` / `RAG_GUARD_JUDGE_ON_ERROR` | `off` / `allow` | `llm` adds a model check after the rules; what to do when it fails. |
 | `RAG_GUARD_MAX_QUESTION_CHARS` | `2000` | Longest question accepted. |
 | `RAG_TENANT_DAILY_TOKEN_BUDGET` | `0` | Tokens per tenant per UTC day before answers fall back to the fast mode. `0` is no limit. |
+| `REDIS_URL` | _(empty; Compose: `redis://redis:6379/0`)_ | Where the caches and the shared token ledger live. Empty means process memory. |
+| `RAG_EMBEDDING_CACHE` / `RAG_EMBEDDING_BATCH` | `on` / `on` | Embedding cache and batched embedding at ingestion. Same vectors, fewer model calls. |
+| `RAG_EMBEDDING_CACHE_SCOPE` | `tenant` | `tenant` or `shared`. Shared gives more hits and a timing signal across tenants. |
+| `RAG_ANSWER_CACHE` | `off` | `off`, `exact` or `semantic`. |
+| `RAG_ANSWER_CACHE_TTL` | `86400` | Seconds. Capped by the earliest source expiry. |
+| `RAG_SEMANTIC_CACHE_THRESHOLD` / `RAG_SEMANTIC_CACHE_GUARD` | `0.92` / `on` | Cosine similarity for a semantic hit, and the slot guard. |
+| `RAG_LLM_CACHE` | `off` | Cache temperature-0 model calls. |
+| `RAG_ROUTING` | `off` | `off`, `static` or `cascade`. |
+| `RAG_MODEL_SMALL` / `RAG_MODEL_MEDIUM` / `RAG_MODEL_LARGE` | `qwen3:1.7b` / `qwen3:4b` / `OLLAMA_MODEL` | The models behind each tier. |
+| `RAG_ROUTE_<TASK>` | measured default | Tier for one task: `GENERATE`, `VERIFY`, `JUDGE`, `QUERY_REWRITE`, `HYDE`, `DECOMPOSE`, `STEP_ANSWER`, `TRANSLATE`, `CONCEPTS`, `TABLE`. |
+| `RAG_CASCADE_FIRST` | `small` | The tier that answers first in the cascade. |
+| `RAG_ROUTE_EXTRACTIVE` / `RAG_EXTRACTIVE_MIN_SCORE` | `off` / `0.9` | Skip the model for confident single-fact questions. Needs re-ranking. |
+| `RAG_COMPACT_SOURCES` / `RAG_CONTEXT_BUDGET` / `RAG_ANSWER_MAX_TOKENS` | `off` / `0` / `0` | Token optimization of the generation prompt. |
+| `RAG_VERIFY_COMPACT` | `off` | The LLM verifier only checks sentences the value check couldn't settle. |
 
 ---
 
@@ -687,3 +748,4 @@ Some existing tests rewrite the tracked `workspace/dynamic_concepts.json`. Resto
 - [x] **Episode #04:** Trustworthy answers: citations, hallucination checks, abstention, trust reports
 - [x] **Episode #05:** Multi-tenant isolation: signed identity, a required tenant scope, pool and silo layouts, offboarding, 22 cross-tenant attacks run before and after
 - [x] **Episode #06:** Observability and guardrails: OpenTelemetry traces and token metrics, outcome labels, a local Grafana stack, business guardrails, a token budget per tenant
+- [x] **Episode #07:** Reducing LLM costs: embedding and answer caches, a guarded semantic cache, model routing and a cascade, prompt and token optimization

@@ -117,6 +117,22 @@ add({
     "options": {"showTime": True, "wrapLogMessage": True, "sortOrder": "Descending", "enableLogDetails": True},
 }, 12, y, 12, 10)
 
+add({"type": "row", "title": "What did caching and routing save?", "collapsed": False, "panels": []}, 0, y, 24, 1); y += 1
+add(lstat("Answered from the cache", f'(sum(count_over_time({LINES} | outcome="answered_cached" [$__range])) or vector(0)) / {total}', "percentunit",
+          desc="Share of questions served by the answer cache, exact or semantic."), 0, y, 6, 4)
+add(lstat("Model time spent", f'sum(sum_over_time({LINES} | unwrap model_seconds [$__range]))', "s",
+          desc="Seconds of model generation the questions actually used."), 6, y, 6, 4)
+add(lstat("Model time saved", f'sum(sum_over_time({LINES} | unwrap saved_model_seconds [$__range]))', "s",
+          desc="Seconds of model time that cache hits avoided, as recorded when each entry was filled."), 12, y, 6, 4)
+add(lstat("Estimated cost", f'sum(sum_over_time({LINES} | unwrap estimated_cost_usd [$__range]))', "currencyUSD",
+          desc="Illustrative: local tokens priced at a hosted model of a similar tier, from config/model_prices.json."), 18, y, 6, 4)
+y += 4
+add(ts("Cache lookups by layer", [target(f'sum by (rag_cache_layer, rag_cache_result) (increase(rag_cache_lookups_total{{{SEL}}}[$__interval]))',
+       "{{rag_cache_layer}} {{rag_cache_result}}")], stack=True), 0, y, 12, 8)
+add(ts("Model calls by model", [target(f'sum by (gen_ai_request_model, gen_ai_operation_name) (increase(gen_ai_client_operation_duration_seconds_count{{{SEL}}}[$__interval]))',
+       "{{gen_ai_operation_name}} {{gen_ai_request_model}}")], stack=True, desc="Where routing sends the calls."), 12, y, 12, 8)
+y += 8
+
 for panel in panels:
     if panel.get("interval") is None:
         panel.pop("interval", None)
