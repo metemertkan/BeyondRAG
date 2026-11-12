@@ -577,3 +577,15 @@ class CrossLingualEmbedder:
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """Batch path for semantic chunking, which embeds every sentence."""
         return self._provider.embed_documents([normalize_for_matching(text) for text in texts])
+
+    def embed_batch(self, texts: List[str], *, batch_size: int = 32, owner: object = None) -> List[List[float]]:
+        """``embed`` for many texts in one call per batch. Same vectors: every provider's
+        ``embed_query`` is ``embed_documents`` of one text. ``owner`` is for the cache wrapper."""
+        vectors: List[List[float]] = []
+        for start in range(0, len(texts), batch_size):
+            vectors += self._provider.embed_documents(
+                [normalize_for_matching(text) for text in texts[start : start + batch_size]]
+            )
+        for vector in vectors:
+            assert_vector_matches_manifest(vector, self._provider.manifest)
+        return vectors

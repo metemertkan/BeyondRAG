@@ -392,7 +392,9 @@ def extract_concepts_at_ingestion(
             entry = registry.get_document_entry(content_hash, tenant=tenant) or {}
             return cached, entry.get("model_used", "ollama-cached")
 
-    model_name = _select_ollama_model()
+    from src.rag.routing import model_for
+
+    model_name = model_for("concepts") or _select_ollama_model()
     system_prompt, user_prompt = packs.concept_extraction_prompts(
         filename=filename,
         text=full_text,
@@ -549,7 +551,7 @@ class LLMQueryTranslator:
             return query
 
         try:
-            llm = self._llm_factory(role="manager", temperature=0.0)
+            llm = self._llm_factory(role="manager", temperature=0.0, task="translate")
             prompt = (
                 f"Translate this {source_language} search query into concise {target_language} "
                 f"search keywords only (output strictly the translated search query without commentary):\n"

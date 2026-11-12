@@ -42,6 +42,7 @@ request_logger = logging.getLogger("beyondrag.request")
 OUTCOME_GROUPS: Final[Dict[str, str]] = {
     "answered": "ok",
     "answered_extractive": "ok",
+    "answered_cached": "ok",
     "degraded_llm_fallback": "degraded",
     "degraded_model_substituted": "degraded",
     "budget_exceeded": "degraded",
@@ -83,6 +84,8 @@ class LlmCallRecord:
     output_tokens: Optional[int] = None
     duration_ms: float = 0.0
     error: Optional[str] = None
+    # Served from a cache: the tokens were spent earlier, by whoever filled it.
+    cached: bool = False
 
 
 @dataclass
@@ -96,6 +99,8 @@ class RequestRecord:
     llm_calls: List[LlmCallRecord] = field(default_factory=list)
     guardrails: List[Dict[str, str]] = field(default_factory=list)
     stages_ms: Dict[str, float] = field(default_factory=dict)
+    cache: List[Dict[str, Any]] = field(default_factory=list)
+    routes: List[Dict[str, str]] = field(default_factory=list)
     started: float = field(default_factory=time.perf_counter)
     duration_ms: float = 0.0
 
@@ -104,15 +109,24 @@ class RequestRecord:
 
     @property
     def input_tokens(self) -> int:
-        return sum(call.input_tokens or 0 for call in self.llm_calls)
+        return sum(call.input_tokens or 0 for call in self.llm_calls if not call.cached)
 
     @property
     def output_tokens(self) -> int:
-        return sum(call.output_tokens or 0 for call in self.llm_calls)
+        return sum(call.output_tokens or 0 for call in self.llm_calls if not call.cached)
+
+    def saved(self) -> Dict[str, float]:
+        """What the caches avoided in this request: tokens and model time, as recorded when filled."""
+        input_tokens = sum(item.get("input_tokens", 0) for item in self.cache if item["hit"])
+        output_tokens = sum(item.get("output_tokens", 0) for item in self.cache if item["hit"])
+        seconds = sum(item.get("model_seconds", 0.0) for item in self.cache if item["hit"])
+        return {"input_tokens": input_tokens, "output_tokens": output_tokens, "model_seconds": round(seconds, 3)}
 
     def to_dict(self) -> Dict[str, Any]:
         by_stage: Dict[str, Dict[str, int]] = {}
         for call in self.llm_calls:
+            if call.cached:
+                continue
             bucket = by_stage.setdefault(call.stage, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
             bucket["calls"] += 1
             bucket["input_tokens"] += call.input_tokens or 0
@@ -127,6 +141,9 @@ class RequestRecord:
             "guardrails": list(self.guardrails),
             "stages_ms": {name: round(value, 2) for name, value in self.stages_ms.items()},
             "tokens": {"input": self.input_tokens, "output": self.output_tokens, "by_stage": by_stage},
+            "cache": list(self.cache),
+            "routes": list(self.routes),
+            "saved": self.saved(),
             "llm_calls": [
                 {
                     "stage": call.stage,
@@ -137,6 +154,7 @@ class RequestRecord:
                     "output_tokens": call.output_tokens,
                     "duration_ms": round(call.duration_ms, 2),
                     "error": call.error,
+                    "cached": call.cached,
                 }
                 for call in self.llm_calls
             ],
@@ -146,6 +164,8 @@ class RequestRecord:
 _RECORD: ContextVar[Optional[RequestRecord]] = ContextVar("beyondrag_request_record", default=None)
 _STAGE: ContextVar[str] = ContextVar("beyondrag_stage", default="none")
 _TENANT: ContextVar[str] = ContextVar("beyondrag_tenant", default="")
+# Set by the LLM call cache when it serves a hit, read once by the callback that follows.
+_LLM_CACHE_HIT: ContextVar[bool] = ContextVar("beyondrag_llm_cache_hit", default=False)
 
 _SETUP_LOCK = threading.Lock()
 _SETUP_DONE = False
@@ -197,6 +217,18 @@ class _Instruments:
         )
         self.guardrails = meter.create_counter(
             "rag.guardrail.decisions", unit="{decision}", description="Guardrail decisions, by guardrail and action."
+        )
+        self.routes = meter.create_counter(
+            "rag.route.decisions", unit="{call}", description="Model calls by task, tier and model."
+        )
+        self.cache_lookups = meter.create_counter(
+            "rag.cache.lookups", unit="{lookup}", description="Cache lookups, by layer and result."
+        )
+        self.cache_saved_tokens = meter.create_counter(
+            "rag.cache.saved.tokens", unit="{token}", description="Model tokens a cache hit avoided, by layer and direction."
+        )
+        self.cache_saved_seconds = meter.create_counter(
+            "rag.cache.saved.duration", unit="s", description="Model time a cache hit avoided, by layer."
         )
 
 
@@ -318,6 +350,43 @@ def note(event: str, detail: Any = "") -> None:
     _instruments().events.add(1, {"rag.event": event, "rag.stage": _STAGE.get(), "rag.tenant": _TENANT.get() or "none"})
 
 
+def route_decision(task: str, tier: str, model: str) -> None:
+    record = _RECORD.get()
+    if record is not None:
+        record.routes.append({"task": task, "tier": tier, "model": model, "stage": _STAGE.get()})
+    trace.get_current_span().add_event("route", {"rag.route.task": task, "rag.route.tier": tier, "gen_ai.request.model": model})
+    _instruments().routes.add(1, {"rag.route.task": task, "rag.route.tier": tier, "gen_ai.request.model": model})
+
+
+def mark_llm_cache_hit() -> None:
+    _LLM_CACHE_HIT.set(True)
+
+
+def cache_lookup(
+    layer: str, hit: bool, *, input_tokens: int = 0, output_tokens: int = 0, model_seconds: float = 0.0, detail: str = ""
+) -> None:
+    """One lookup in one cache layer. On a hit, what it avoided, as recorded when the entry was filled."""
+    record = _RECORD.get()
+    entry: Dict[str, Any] = {"layer": layer, "hit": hit}
+    if hit:
+        entry.update({"input_tokens": int(input_tokens), "output_tokens": int(output_tokens), "model_seconds": round(model_seconds, 3)})
+    if detail:
+        entry["detail"] = safe_text(detail, _MAX_DETAIL)
+    if record is not None:
+        record.cache.append(entry)
+    trace.get_current_span().add_event("cache", {"rag.cache.layer": layer, "rag.cache.hit": hit})
+    instruments = _instruments()
+    labels = {"rag.cache.layer": layer, "rag.tenant": _TENANT.get() or "none"}
+    instruments.cache_lookups.add(1, {**labels, "rag.cache.result": "hit" if hit else "miss"})
+    if hit:
+        if input_tokens:
+            instruments.cache_saved_tokens.add(int(input_tokens), {**labels, "gen_ai.token.type": "input"})
+        if output_tokens:
+            instruments.cache_saved_tokens.add(int(output_tokens), {**labels, "gen_ai.token.type": "output"})
+        if model_seconds:
+            instruments.cache_saved_seconds.add(float(model_seconds), labels)
+
+
 def guardrail_decision(guardrail: str, action: str, reason: str = "") -> None:
     text = safe_text(reason, _MAX_DETAIL)
     record = _RECORD.get()
@@ -426,6 +495,10 @@ def _finish_request(record: RequestRecord, span: trace.Span) -> None:
                 "output_tokens": record.output_tokens,
                 "llm_calls": len(record.llm_calls),
                 "llm_errors": sum(1 for call in record.llm_calls if call.error),
+                "cache_hits": [item["layer"] for item in record.cache if item["hit"]],
+                "saved_input_tokens": record.saved()["input_tokens"],
+                "saved_output_tokens": record.saved()["output_tokens"],
+                "saved_model_seconds": record.saved()["model_seconds"],
                 "events": [item["event"] for item in record.events],
                 "guardrails": [f"{item['guardrail']}:{item['action']}" for item in record.guardrails],
                 "detail": record.detail,
@@ -450,6 +523,7 @@ class LlmCall:
         self.input_tokens: Optional[int] = None
         self.output_tokens: Optional[int] = None
         self.completion: Optional[str] = None
+        self.cached = False
         self._finished = False
 
     def set_usage(self, input_tokens: Any, output_tokens: Any) -> None:
@@ -474,13 +548,17 @@ class LlmCall:
             self.span.record_exception(error)
             self.span.set_attribute("error.type", error_type)
             self.span.set_status(Status(StatusCode.ERROR, safe_text(error, _MAX_DETAIL)))
-        if self.input_tokens is not None:
+        if self.cached:
+            # A replayed answer. Its usage describes the call that filled the cache, not this one.
+            self.span.set_attribute("rag.cache.hit", True)
+            cache_lookup("llm_call", True, input_tokens=self.input_tokens or 0, output_tokens=self.output_tokens or 0)
+        if self.input_tokens is not None and not self.cached:
             self.span.set_attribute("gen_ai.usage.input_tokens", self.input_tokens)
             instruments.tokens.record(self.input_tokens, {**labels, "gen_ai.token.type": "input"})
-        if self.output_tokens is not None:
+        if self.output_tokens is not None and not self.cached:
             self.span.set_attribute("gen_ai.usage.output_tokens", self.output_tokens)
             instruments.tokens.record(self.output_tokens, {**labels, "gen_ai.token.type": "output"})
-        if error is None and self.input_tokens is None and self.output_tokens is None:
+        if error is None and self.input_tokens is None and self.output_tokens is None and not self.cached:
             # A provider that reports no usage would otherwise look free on the dashboard.
             self.span.add_event("usage_missing")
             instruments.events.add(
@@ -488,7 +566,8 @@ class LlmCall:
             )
         if self.completion is not None and capture_content():
             self.span.set_attribute("gen_ai.output.messages", safe_text(self.completion))
-        instruments.llm_duration.record(elapsed, {**labels, "error.type": error_type} if error_type else labels)
+        if not self.cached:
+            instruments.llm_duration.record(elapsed, {**labels, "error.type": error_type} if error_type else labels)
         self.span.end()
         if self.record is not None:
             self.record.llm_calls.append(
@@ -501,9 +580,10 @@ class LlmCall:
                     output_tokens=self.output_tokens,
                     duration_ms=elapsed * 1000.0,
                     error=error_type,
+                    cached=self.cached,
                 )
             )
-        if self.tenant and (self.input_tokens or self.output_tokens):
+        if self.tenant and (self.input_tokens or self.output_tokens) and not self.cached:
             for listener in list(_USAGE_LISTENERS):
                 try:
                     listener(self.tenant, self.input_tokens or 0, self.output_tokens or 0)
@@ -600,6 +680,9 @@ class GenAiTelemetryHandler(BaseCallbackHandler):
                 usage.get("input_tokens", usage.get("prompt_tokens")),
                 usage.get("output_tokens", usage.get("completion_tokens")),
             )
+            # LangChain replays the stored usage on a cache hit and only adds total_cost=0.
+            call.cached = _LLM_CACHE_HIT.get() or (isinstance(usage, dict) and usage.get("total_cost") == 0)
+            _LLM_CACHE_HIT.set(False)
             response_model = (getattr(message, "response_metadata", None) or {}).get("model")
             if response_model:
                 call.span.set_attribute("gen_ai.response.model", str(response_model))
@@ -629,6 +712,7 @@ def classify_outcome(record: RequestRecord, synthesis_mode: str, trust_report: O
     """Pick the one label for a finished request. The first match wins."""
     for event, outcome in (
         ("blocked_input", "blocked_input"),
+        ("answer_cache_hit", "answered_cached"),
         ("blocked_output", "blocked_output"),
         ("access_blocked", "access_blocked"),
         ("no_documents", "no_documents"),
@@ -637,6 +721,7 @@ def classify_outcome(record: RequestRecord, synthesis_mode: str, trust_report: O
         ("llm_fallback", "degraded_llm_fallback"),
         ("model_substituted", "degraded_model_substituted"),
         ("model_abstained", "abstained_model"),
+        ("route_extractive", "answered_extractive"),
     ):
         if record.has(event):
             return outcome

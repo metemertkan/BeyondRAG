@@ -102,7 +102,14 @@ def llm_timeout_seconds() -> float | None:
     return value if value > 0 else None
 
 
-def get_llm(role: str = "architect", temperature: float = 0.2) -> BaseChatModel:
+def get_llm(
+    role: str = "architect",
+    temperature: float = 0.2,
+    *,
+    task: str | None = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
+) -> BaseChatModel:
     """Instantiate a resilient Dual-LLM router for the specified agent role.
 
     Primary models via ChatGoogleGenerativeAI:
@@ -129,6 +136,12 @@ def get_llm(role: str = "architect", temperature: float = 0.2) -> BaseChatModel:
 
     env_ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
     installed_models = _detect_host_ollama_models(OLLAMA_BASE_URL)
+    from src.rag.routing import model_for
+
+    # An explicit model (the cascade), else the task's route (RAG_ROUTING), else OLLAMA_MODEL.
+    routed = model or model_for(task)
+    if routed:
+        env_ollama_model = routed
 
     # Determine default Ollama model: env override > installed lightweight models > default tag
     if env_ollama_model and (not installed_models or env_ollama_model in installed_models):
@@ -156,6 +169,12 @@ def get_llm(role: str = "architect", temperature: float = 0.2) -> BaseChatModel:
     # Without a timeout, a model server that accepts the connection and never answers holds
     # the request forever. Measured in scripts/ep6_benchmark.py (section failures).
     client_kwargs = {"timeout": llm_timeout_seconds()}
+    from src.rag.llm_cache import get_llm_call_cache
+
+    # Only calls whose answer the prompt decides. A cached temperature-0.2 answer would turn
+    # sampling off without saying so.
+    call_cache = get_llm_call_cache() if temperature == 0 else None
+    cache_arg: Any = call_cache if call_cache is not None else False
     ollama_llm = ChatOllama(
         model=ollama_model_name,
         base_url=OLLAMA_BASE_URL,
@@ -163,6 +182,8 @@ def get_llm(role: str = "architect", temperature: float = 0.2) -> BaseChatModel:
         reasoning=False,
         callbacks=callbacks,
         client_kwargs=client_kwargs,
+        cache=cache_arg,
+        num_predict=max_tokens,
     )
 
     fallback_chain: list[BaseChatModel] = [ollama_llm]
@@ -176,6 +197,7 @@ def get_llm(role: str = "architect", temperature: float = 0.2) -> BaseChatModel:
                 reasoning=False,
                 callbacks=callbacks,
                 client_kwargs=client_kwargs,
+                cache=cache_arg,
             ),
         )
 

@@ -75,12 +75,37 @@ services:
       - RAG_GUARD_JUDGE=${RAG_GUARD_JUDGE:-off}
       - RAG_GUARD_JUDGE_ON_ERROR=${RAG_GUARD_JUDGE_ON_ERROR:-allow}
       - RAG_TENANT_DAILY_TOKEN_BUDGET=${RAG_TENANT_DAILY_TOKEN_BUDGET:-0}
+      # Episode 7: caches, routing, token optimization. Defaults keep Episode 6 behaviour,
+      # except the embedding cache and batching, which change no result.
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - RAG_CACHE_PREFIX=${RAG_CACHE_PREFIX:-beyondrag}
+      - RAG_EMBEDDING_CACHE=${RAG_EMBEDDING_CACHE:-on}
+      - RAG_EMBEDDING_CACHE_SCOPE=${RAG_EMBEDDING_CACHE_SCOPE:-tenant}
+      - RAG_EMBEDDING_BATCH=${RAG_EMBEDDING_BATCH:-on}
+      - RAG_ANSWER_CACHE=${RAG_ANSWER_CACHE:-off}
+      - RAG_ANSWER_CACHE_TTL=${RAG_ANSWER_CACHE_TTL:-86400}
+      - RAG_SEMANTIC_CACHE_THRESHOLD=${RAG_SEMANTIC_CACHE_THRESHOLD:-0.92}
+      - RAG_SEMANTIC_CACHE_GUARD=${RAG_SEMANTIC_CACHE_GUARD:-on}
+      - RAG_LLM_CACHE=${RAG_LLM_CACHE:-off}
+      - RAG_ROUTING=${RAG_ROUTING:-off}
+      - RAG_MODEL_SMALL=${RAG_MODEL_SMALL:-qwen3:1.7b}
+      - RAG_MODEL_MEDIUM=${RAG_MODEL_MEDIUM:-qwen3:4b}
+      - RAG_MODEL_LARGE=${RAG_MODEL_LARGE:-}
+      - RAG_CASCADE_FIRST=${RAG_CASCADE_FIRST:-small}
+      - RAG_ROUTE_EXTRACTIVE=${RAG_ROUTE_EXTRACTIVE:-off}
+      - RAG_EXTRACTIVE_MIN_SCORE=${RAG_EXTRACTIVE_MIN_SCORE:-0.9}
+      - RAG_COMPACT_SOURCES=${RAG_COMPACT_SOURCES:-off}
+      - RAG_CONTEXT_BUDGET=${RAG_CONTEXT_BUDGET:-0}
+      - RAG_ANSWER_MAX_TOKENS=${RAG_ANSWER_MAX_TOKENS:-0}
+      - RAG_VERIFY_COMPACT=${RAG_VERIFY_COMPACT:-off}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./workspace:/app/workspace
     depends_on:
       elasticsearch:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   elasticsearch:
@@ -100,6 +125,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+
+  # Episode 7: caches and the shared token ledger. Cache entries carry a TTL and are the only
+  # keys volatile-lru may evict; the ledger has none, so it is never evicted.
+  redis:
+    image: redis:8.2.11
+    container_name: beyondrag_redis
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "512mb", "--maxmemory-policy", "volatile-lru", "--save", "300", "1", "--appendonly", "no"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
 
   ollama:
     image: ollama/ollama:latest
@@ -132,4 +172,5 @@ services:
 
 volumes:
   es_data:
+  redis_data:
   ollama_data:

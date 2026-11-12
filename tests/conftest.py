@@ -25,6 +25,12 @@ atexit.register(shutil.rmtree, _WORKSPACE, ignore_errors=True)
 # Telemetry goes to memory in tests, never to a collector, whatever the shell has set.
 os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
 os.environ["RAG_GUARDRAILS"] = "off"
+# Caches in process memory, never a shared Redis; tests that want one say so.
+os.environ["REDIS_URL"] = ""
+os.environ["RAG_CACHE_PREFIX"] = "beyondrag-pytest"
+os.environ["RAG_ANSWER_CACHE"] = "off"
+os.environ["RAG_LLM_CACHE"] = "off"
+os.environ["RAG_ROUTING"] = "off"
 
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader  # noqa: E402
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor  # noqa: E402

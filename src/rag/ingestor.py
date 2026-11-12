@@ -16,6 +16,8 @@ Guarantees:
 
 from __future__ import annotations
 
+import os
+
 import hashlib
 import logging
 import re
@@ -172,6 +174,13 @@ class PdfIngestor:
             )
         raise ValueError(f"No compatible extractor found for {filename}")
 
+    def _embed_all(self, texts: List[str], *, owner: tuple[str, str]) -> List[List[float]]:
+        """One call per batch of chunks, not one per chunk, when the embedder can batch."""
+        batch = getattr(self._embedder, "embed_batch", None)
+        if callable(batch) and os.getenv("RAG_EMBEDDING_BATCH", "on").strip().lower() != "off":
+            return list(batch(texts, owner=owner))
+        return [self._embedder.embed(text) for text in texts]
+
     def _build_chunks_from_blocks(
         self,
         *,
@@ -226,11 +235,11 @@ class PdfIngestor:
             for page_num, extracted_text in pages:
                 add_text_units(page_num, extracted_text, "paragraph", {})
 
-        for page_num, chunk_str, block_type, block_meta, parent_id, parent_text in units:
+        enriched_texts = [f"{safe_filename} (Page {unit[0]}): {unit[1]}" for unit in units]
+        vectors = self._embed_all(enriched_texts, owner=(tenant, assigned_doc_id))
+        for (page_num, chunk_str, block_type, block_meta, parent_id, parent_text), vector in zip(units, vectors):
             global_chunk_idx += 1
             chunk_id = f"{assigned_doc_id}_p{page_num}_c{global_chunk_idx}"
-            enriched_text = f"{safe_filename} (Page {page_num}): {chunk_str}"
-            vector = self._embedder.embed(enriched_text)
             assert_vector_matches_manifest(vector, manifest)
             chunk_records.append(
                 {

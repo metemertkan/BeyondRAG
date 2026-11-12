@@ -27,6 +27,7 @@ instead of answering from another tenant's data. Ingestion keeps its optional te
 from __future__ import annotations
 
 import inspect
+import os
 from dataclasses import asdict, replace
 from typing import Any, Dict, Final, List, Optional
 
@@ -39,6 +40,8 @@ from src.rag.acl import (
 )
 from src.rag import telemetry
 from src.rag.governance import DocumentGovernance, detect_conflicts
+from src.rag.answer_cache import AnswerCache
+from src.rag.routing import extractive_min_score, extractive_route_enabled, is_single_fact
 from src.rag.guardrails import GuardrailEngine, get_guardrails
 from src.rag.multi_hop import MultiHopPlanner
 from src.rag.pipeline import PipelineOptions, PipelineResult, RetrievalPipeline
@@ -95,7 +98,11 @@ def _wire_default_components(
         index_name=KB_INDEX_NAME,
     )
     extractor = DocumentParserRegistry()
-    embedder = CrossLingualEmbedder()
+    embedder: Any = CrossLingualEmbedder()
+    from src.rag.embedding_cache import CachingEmbedder, embedding_cache_enabled
+
+    if embedding_cache_enabled():
+        embedder = CachingEmbedder(embedder)
     chunker = create_chunker(embedder=embedder)
     cross_lingual = DefaultCrossLingualAdapter()
     repository = DocumentRepository(
@@ -153,9 +160,11 @@ class RBACKnowledgeBaseService:
         multi_hop_planner: MultiHopPlanner | None = None,
         answer_verifier: AnswerVerifier | None = None,
         guardrails: GuardrailEngine | None = None,
+        answer_cache: AnswerCache | None = None,
     ) -> None:
         # On the service, not on the HTTP route, so every caller goes through the same checks.
         self._guardrails = guardrails or get_guardrails()
+        self._answer_cache_override = answer_cache
         self._reranker_override = reranker
         self._answer_verifier = answer_verifier or AnswerVerifier(LlmClaimVerifier())
         self._multi_hop = multi_hop_planner or MultiHopPlanner()
@@ -208,6 +217,21 @@ class RBACKnowledgeBaseService:
             self._retriever = retriever
             self._synthesizer = synthesizer
             self._seeder = seeder
+        self._answer_cache = self._answer_cache_override or AnswerCache(embedder=self._embedder)
+        # Every write to the repository reaches the caches, whichever code path made it.
+        listeners = getattr(self._repository, "change_listeners", None)
+        if listeners is not None:
+            listeners.append(self._on_repository_change)
+
+    def _on_repository_change(self, tenant: str, kind: str, doc_ids: List[str]) -> None:
+        self._answer_cache.on_change(tenant, kind, doc_ids)
+        purge = getattr(self._embedder, "purge_owner", None)
+        if kind == "remove" and callable(purge):
+            purge(tenant, doc_ids)
+
+    @property
+    def answer_cache(self) -> AnswerCache:
+        return self._answer_cache
 
     @property
     def es_url(self) -> str:
@@ -344,6 +368,10 @@ class RBACKnowledgeBaseService:
             )
             # Every request leaves with exactly one label. "It returned 200" is not one of them.
             record.outcome = telemetry.classify_outcome(record, synthesis_mode, response.get("trust_report"))
+            cache_ctx = response.pop("_cache_ctx", None)
+            if cache_ctx is not None and record.outcome in {"answered", "answered_extractive"}:
+                # Only full answers. A fallback cached during an outage would outlive the outage.
+                self._answer_cache.store_answer(cache_ctx, response, _spent(record))
         # Read after the scope closes, so the duration and the reason are final.
         response["telemetry"] = record.to_dict()
         response["guardrails"]["decisions"] = list(record.guardrails)
@@ -391,6 +419,19 @@ class RBACKnowledgeBaseService:
                     "answer": verdict.message,
                     "guardrails": guardrail_report,
                 }
+        cache_ctx = None
+        if self._answer_cache.policy.enabled:
+            # Before the budget check: a cached answer costs no tokens, so it's served even over budget.
+            cache_ctx = self._answer_cache.context(
+                question, tenant, effective_acl_tags, mode=synthesis_mode, options=asdict(options), top_k=top_k,
+                profile=retrieval_profile, model=os.getenv("OLLAMA_MODEL", ""),
+            )
+            with telemetry.stage("answer_cache"):
+                cached = self._answer_cache.lookup(cache_ctx)
+            if cached is not None:
+                return {**cached, "question": question, "guardrails": guardrail_report}
+
+        if guarded:
             uses_model = synthesis_mode == "llm" or options.query_mode != "off" or options.multi_hop
             if uses_model and guard.over_budget(tenant):
                 # Still answers, from the documents alone. Search and its embedding call go on.
@@ -475,6 +516,14 @@ class RBACKnowledgeBaseService:
 
         trust_report: Optional[Dict[str, Any]] = None
         best = max((float(c.get("score") or 0.0) for c in authorized_chunks), default=0.0)
+        if (
+            synthesis_mode == "llm" and reranked and extractive_route_enabled()
+            and best >= extractive_min_score() and is_single_fact(question)
+        ):
+            # The cheapest model call is the one not made: one confident source, one fact.
+            telemetry.note("route_extractive", f"re-ranker score {best:.3f}, a single-fact question")
+            telemetry.route_decision("generate", "none", "extractive")
+            synthesis_mode = "fast"
         if options.min_relevance is not None and reranked and authorized_chunks and best < options.min_relevance:
             # Refuse before generating: nothing retrieved looks like an answer, so no LLM call.
             answer = ABSTAIN_MESSAGE
@@ -527,6 +576,8 @@ class RBACKnowledgeBaseService:
             "trust_report": trust_report,
             "answer": answer,
             "guardrails": guardrail_report,
+            # Popped by query_and_chat, which stores the answer once its outcome is known.
+            "_cache_ctx": cache_ctx,
         }
 
     def _verify_answer(self, answer: str, options: PipelineOptions) -> tuple[Dict[str, Any], str]:
@@ -549,6 +600,16 @@ class RBACKnowledgeBaseService:
             reranker = self._reranker_override or FastEmbedCrossEncoder()
             self._pipeline = RetrievalPipeline(self._retriever, self._embedder, reranker=reranker)
         return self._pipeline
+
+
+def _spent(record: telemetry.RequestRecord) -> Dict[str, float]:
+    """What this answer cost to make, so a later hit can report what it saved."""
+    calls = [call for call in record.llm_calls if not call.cached]
+    return {
+        "input_tokens": sum(call.input_tokens or 0 for call in calls),
+        "output_tokens": sum(call.output_tokens or 0 for call in calls),
+        "model_seconds": round(sum(call.duration_ms for call in calls) / 1000.0, 3),
+    }
 
 
 _KB_SERVICE_INSTANCE: RBACKnowledgeBaseService | None = None

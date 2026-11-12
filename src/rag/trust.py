@@ -14,6 +14,7 @@ supported sentences, or no answer at all.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, Final, List, Literal, Mapping, Optional, Sequence
@@ -204,7 +205,7 @@ class LlmClaimVerifier:
             for i, s in enumerate(sentences, start=1)
         )
         result = (
-            self._llm_factory(role="manager", temperature=0.0)
+            self._llm_factory(role="manager", temperature=0.0, task="verify")
             .with_structured_output(_Verdicts)
             .invoke(
                 "Check each numbered sentence against the sources it cites. Label it supported only if "
@@ -223,9 +224,13 @@ class LlmClaimVerifier:
 
 
 class AnswerVerifier:
-    def __init__(self, llm_verifier: Optional[LlmClaimVerifier] = None, *, numeric: bool = True) -> None:
+    def __init__(
+        self, llm_verifier: Optional[LlmClaimVerifier] = None, *, numeric: bool = True, compact: Optional[bool] = None
+    ) -> None:
         self._llm = llm_verifier
         self._numeric = numeric
+        # RAG_VERIFY_COMPACT=on: ask the LLM only about sentences the value check can't settle.
+        self._compact = compact if compact is not None else os.getenv("RAG_VERIFY_COMPACT", "off").strip().lower() == "on"
 
     def report(self, raw_answer: str, sources: Mapping[str, Mapping[str, Any]], *, use_llm: bool = True) -> TrustReport:
         if is_not_found(raw_answer):
@@ -253,10 +258,30 @@ class AnswerVerifier:
                             check.flag("miscited", f"{value} is in a source this sentence doesn't cite.")
                     else:
                         check.flag("unsupported", f"{value} doesn't appear in any source.")
-        if self._llm is not None and use_llm and checks:
+        pending = checks
+        if self._compact and self._numeric:
+            # A sentence whose every value is in the source it cites is settled; so is one
+            # already flagged. Only the rest cost an LLM call, and with none left, nothing does.
+            pending = []
+            for check in checks:
+                cited_text = " ".join(texts[sid] for sid in check.citations if sid in texts)
+                values = checkable_values(check.text)
+                if check.status != "unchecked":
+                    continue
+                if values and cited_text and all(value_in(v, cited_text) for v in values):
+                    check.status = "supported"
+                    continue
+                pending.append(check)
+            if checks and not pending:
+                run.append("llm_skipped")
+        if self._llm is not None and use_llm and pending:
             run.append("llm")
             try:
-                verdicts = self._llm.verify(cited, texts)
+                if pending is checks:
+                    verdicts = self._llm.verify(cited, texts)
+                else:
+                    asked = self._llm.verify([cited[c.index - 1] for c in pending], texts)
+                    verdicts = {pending[i - 1].index: v for i, v in asked.items() if 0 < i <= len(pending)}
             except Exception as exc:
                 # Reported, so the absence of an LLM check is never mistaken for a pass.
                 logger.warning("LLM claim verification failed: %s", exc)
