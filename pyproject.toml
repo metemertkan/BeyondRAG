@@ -21,6 +21,10 @@ dependencies = [
     "langchain-google-genai>=4.0.0",
     "langchain-ollama>=0.2.0",
     "pyjwt>=2.8.0",
+    "opentelemetry-api>=1.30.0",
+    "opentelemetry-sdk>=1.30.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.30.0",
+    "opentelemetry-instrumentation-fastapi>=0.51b0",
 ]
 
 [project.optional-dependencies]

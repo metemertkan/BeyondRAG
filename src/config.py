@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any, Final
@@ -14,6 +15,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 # RAG_WORKSPACE_DIR moves the registry, uploads and other state. The tests point it at a
@@ -93,6 +96,12 @@ def _detect_host_ollama_models(base_url: str) -> list[str]:
         return []
 
 
+def llm_timeout_seconds() -> float | None:
+    """Seconds to wait for one model reply. ``RAG_LLM_TIMEOUT_SECONDS``, 0 means no limit."""
+    value = float(os.getenv("RAG_LLM_TIMEOUT_SECONDS", "180"))
+    return value if value > 0 else None
+
+
 def get_llm(role: str = "architect", temperature: float = 0.2) -> BaseChatModel:
     """Instantiate a resilient Dual-LLM router for the specified agent role.
 
@@ -131,14 +140,29 @@ def get_llm(role: str = "architect", temperature: float = 0.2) -> BaseChatModel:
                 selected = pref
                 break
         ollama_model_name = selected or installed_models[0]
+        # This used to happen without a word: a typo in OLLAMA_MODEL served another model.
+        from src.rag.telemetry import note
+
+        logger.warning("OLLAMA_MODEL %s is not installed; using %s", env_ollama_model, ollama_model_name)
+        note("model_substituted", f"{env_ollama_model} is not installed; used {ollama_model_name}")
     else:
         ollama_model_name = "qwen2.5:1.5b"
 
+    # Imported here: src.rag imports this module while it loads.
+    from src.rag.telemetry import genai_handler
+
+    # Attached to the model itself, so chains and structured output built on it are traced too.
+    callbacks = [genai_handler()]
+    # Without a timeout, a model server that accepts the connection and never answers holds
+    # the request forever. Measured in scripts/ep6_benchmark.py (section failures).
+    client_kwargs = {"timeout": llm_timeout_seconds()}
     ollama_llm = ChatOllama(
         model=ollama_model_name,
         base_url=OLLAMA_BASE_URL,
         temperature=temperature,
         reasoning=False,
+        callbacks=callbacks,
+        client_kwargs=client_kwargs,
     )
 
     fallback_chain: list[BaseChatModel] = [ollama_llm]
@@ -150,6 +174,8 @@ def get_llm(role: str = "architect", temperature: float = 0.2) -> BaseChatModel:
                 base_url=OLLAMA_BASE_URL,
                 temperature=temperature,
                 reasoning=False,
+                callbacks=callbacks,
+                client_kwargs=client_kwargs,
             ),
         )
 
@@ -165,6 +191,7 @@ def get_llm(role: str = "architect", temperature: float = 0.2) -> BaseChatModel:
         model=gemini_model_name,
         google_api_key=GOOGLE_API_KEY,
         temperature=temperature,
+        callbacks=callbacks,
     )
     bound = gemini_llm.with_fallbacks(fallback_chain)
     return ResilientChatRouter(

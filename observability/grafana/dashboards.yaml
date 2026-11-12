@@ -1,0 +1,9 @@
+apiVersion: 1
+providers:
+  - name: beyondrag
+    folder: BeyondRAG
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /otel-lgtm/beyondrag-dashboards

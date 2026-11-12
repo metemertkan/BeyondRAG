@@ -25,6 +25,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from src.rag import telemetry
 from src.rag.acl import build_effective_acl_tags
 from src.rag.auth import (
     DEFAULT_TOKEN_TTL_SECONDS,
@@ -36,6 +37,7 @@ from src.rag.auth import (
 )
 from src.rag.erasure import ErasedSourceError
 from src.rag.governance import DocumentGovernance
+from src.rag.guardrails import get_guardrails
 from src.rag.pipeline import PipelineOptions
 from src.rag.seeding import DEMO_ROLES, DEMO_TENANTS, seed_lab_documents
 from src.rag.service import get_kb_service, normalize_tags
@@ -72,6 +74,14 @@ if _CORS_ORIGINS:
     )
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# Before the first request, so the HTTP span is the parent of everything a question does.
+telemetry.setup_telemetry()
+if os.getenv("OTEL_SDK_DISABLED", "false").strip().lower() != "true":
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+    # Health checks and static files every few seconds would bury the traces worth reading.
+    FastAPIInstrumentor.instrument_app(app, excluded_urls="/api/health,/static")
 
 
 class ChatRequest(BaseModel):
@@ -498,6 +508,12 @@ async def seed_demo_documents(principal: Principal = Depends(_principal)) -> Dic
         "documents": kb.list_documents(tenant=principal.tenant),
         "available_tags": kb.list_available_tags(tenant=principal.tenant),
     }
+
+
+@app.get("/api/usage")
+async def token_usage(principal: Principal = Depends(_principal)) -> Dict[str, Any]:
+    """Tokens the caller's own tenant used today, and its budget. Never another tenant's."""
+    return get_guardrails().usage_report(principal.tenant)
 
 
 @app.post("/api/chat")

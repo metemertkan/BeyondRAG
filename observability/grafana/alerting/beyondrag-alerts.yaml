@@ -1,0 +1,63 @@
+# Grafana alert rules, loaded at start. They show under Alerting; no contact point is set up,
+# so nothing is sent anywhere until one is added.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: beyondrag
+    folder: BeyondRAG
+    interval: 1m
+    rules:
+      - uid: beyondrag-not-answered
+        title: More than 20% of questions degraded or failed
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: "{{ humanizePercentage $values.B.Value }} of questions in the last 10 minutes were degraded or failed."
+          description: >-
+            Degraded answers return HTTP 200, so an uptime check stays green. Open the
+            BeyondRAG dashboard and the trace table for the reason.
+        labels:
+          team: beyondrag
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 600, to: 0}
+            model:
+              refId: A
+              expr: >-
+                sum(increase(rag_requests_total{rag_outcome_group=~"degraded|error"}[10m]))
+                / clamp_min(sum(increase(rag_requests_total[10m])), 1)
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model: {refId: C, type: threshold, expression: B, conditions: [{evaluator: {type: gt, params: [0.2]}}]}
+      - uid: beyondrag-guardrail-spike
+        title: Guardrail blocks rising
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: "{{ $values.B.Value }} guardrail blocks in 10 minutes."
+          description: Someone may be probing the assistant, or a rule started blocking ordinary questions.
+        labels:
+          team: beyondrag
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 600, to: 0}
+            model:
+              refId: A
+              expr: sum(increase(rag_guardrail_decisions_total{rag_guardrail_action="block"}[10m]))
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model: {refId: C, type: threshold, expression: B, conditions: [{evaluator: {type: gt, params: [20]}}]}

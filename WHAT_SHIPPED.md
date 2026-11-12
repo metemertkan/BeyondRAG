@@ -4,6 +4,23 @@
 
 This file records the first Episode 2 increment (versioning, PDF layout, embedding contract), then the second (Excel, multilingual, semantic chunking, trust tiers, GDPR, CI evaluation) under "Ingestion challenges increment". Where the two disagree, the second is current.
 
+## Observability and guardrails increment (Episode 6)
+
+| Claim | Where | Test |
+| --- | --- | --- |
+| A model call inside a question is a child span with tokens, stage and tenant | `telemetry.py`, `config.py` | `test_a_model_call_inside_a_request_is_a_child_span_with_tokens`, `test_token_metrics_carry_stage_and_tenant` |
+| Direct HTTP model calls (concept extraction, embeddings) report usage and errors | `cross_lingual.py`, `embeddings.py` | `test_direct_http_calls_report_usage_and_errors` |
+| Every answer leaves with exactly one outcome; a missing one or an exception is `error` | `telemetry.py`, `service.py` | `test_outcome_classification`, `test_a_request_without_an_outcome_is_counted_as_an_error`, `test_every_answer_carries_a_trace_id_tokens_and_an_outcome` |
+| A model failure and an empty model answer are degraded, not ok | `synthesizer.py` | `test_a_model_failure_is_degraded_not_ok`, `test_an_empty_model_answer_is_degraded_too` |
+| Personal data is masked in telemetry, log lines and guarded responses | `pii.py`, `telemetry.py`, `guardrails.py` | `test_redaction_*`, `test_event_details_are_masked`, `test_the_wide_event_log_line_has_no_question_text`, `test_personal_data_is_masked_in_the_answer_and_the_returned_chunks` |
+| Blocked questions never reach search or the model | `service.py`, `guardrails.py` | `test_a_blocked_question_never_reaches_search_or_the_model` |
+| Planted instructions are dropped before the model reads them | `guardrails.py` | `test_a_planted_instruction_is_dropped_before_the_model_reads_it` |
+| Daily token budget per tenant degrades to the fast answer | `guardrails.py` | `test_over_budget_tenants_get_the_fast_answer_and_no_model_call`, `test_model_tokens_are_added_to_the_tenant_ledger` |
+| Grafana, Prometheus, Tempo and Loki as an opt-in compose profile, with a dashboard and alerts | `docker-compose.yml`, `observability/` | Run by hand: `docker compose --profile observability up -d lgtm` |
+| Failures, tokens, guardrails, personal data, planted instructions, budget, overhead measured | `scripts/ep6_benchmark.py` | Run by hand |
+
+Not shipped: guardrail rules beyond English, detection of names and addresses, a shared token ledger for more than one process, retention or erasure of tenant names in the telemetry backends, and a production-grade Grafana setup.
+
 ## Multi-tenant isolation increment (Episode 5)
 
 | Claim | Where | Test |

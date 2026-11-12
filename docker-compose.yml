@@ -55,6 +55,26 @@ services:
       - RAG_INDEX_PREFIX=${RAG_INDEX_PREFIX:-hk-rbac-rag-kb}
       - RAG_DEFAULT_TENANT=${RAG_DEFAULT_TENANT:-default}
       - FASTEMBED_CACHE_PATH=/app/workspace/.fastembed
+      # Episode 6. Empty sends nothing anywhere. With the observability profile running,
+      # set OTEL_EXPORTER_OTLP_ENDPOINT=http://lgtm:4318 in .env.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-beyondrag}
+      - OTEL_METRIC_EXPORT_INTERVAL=${OTEL_METRIC_EXPORT_INTERVAL:-15000}
+      - OTEL_SDK_DISABLED=${OTEL_SDK_DISABLED:-false}
+      - OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=${OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT:-false}
+      - RAG_LLM_TIMEOUT_SECONDS=${RAG_LLM_TIMEOUT_SECONDS:-180}
+      - RAG_CONCEPT_MAX_TOKENS=${RAG_CONCEPT_MAX_TOKENS:-1024}
+      - RAG_GUARDRAILS=${RAG_GUARDRAILS:-off}
+      - RAG_GUARD_MAX_QUESTION_CHARS=${RAG_GUARD_MAX_QUESTION_CHARS:-2000}
+      - RAG_GUARD_INJECTION=${RAG_GUARD_INJECTION:-block}
+      - RAG_GUARD_ADVICE=${RAG_GUARD_ADVICE:-block}
+      - RAG_GUARD_PII_QUESTION=${RAG_GUARD_PII_QUESTION:-redact}
+      - RAG_GUARD_PII_ANSWER=${RAG_GUARD_PII_ANSWER:-redact}
+      - RAG_GUARD_CONTEXT=${RAG_GUARD_CONTEXT:-drop}
+      - RAG_GUARD_PROMPT_LEAK=${RAG_GUARD_PROMPT_LEAK:-block}
+      - RAG_GUARD_JUDGE=${RAG_GUARD_JUDGE:-off}
+      - RAG_GUARD_JUDGE_ON_ERROR=${RAG_GUARD_JUDGE_ON_ERROR:-allow}
+      - RAG_TENANT_DAILY_TOKEN_BUDGET=${RAG_TENANT_DAILY_TOKEN_BUDGET:-0}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -91,6 +111,24 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+
+  # Episode 6: Grafana with Prometheus (metrics), Tempo (traces) and Loki (logs) behind one
+  # OpenTelemetry collector. Opt in: docker compose --profile observability up -d lgtm
+  # A development image: one container, anonymous admin login, data lost with the container.
+  lgtm:
+    image: grafana/otel-lgtm:0.40.0
+    container_name: beyondrag_lgtm
+    profiles:
+      - observability
+    restart: unless-stopped
+    ports:
+      - "3000:3000"   # Grafana
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    volumes:
+      - ./observability/grafana/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/beyondrag.yaml:ro
+      - ./observability/grafana/dashboards:/otel-lgtm/beyondrag-dashboards:ro
+      - ./observability/grafana/alerting/beyondrag-alerts.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/beyondrag-alerts.yaml:ro
 
 volumes:
   es_data:
