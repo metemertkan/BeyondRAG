@@ -28,8 +28,15 @@ from src.rag import telemetry
 TIERS = ("small", "medium", "large")
 TASKS = ("query_rewrite", "hyde", "decompose", "step_answer", "translate", "concepts", "judge", "verify", "table", "generate")
 
-# Measured defaults. "large" means no change from before routing.
+# Measured defaults (scripts/ep7_benchmark.py, section routing_tasks). "large" means no change
+# from before routing; a task moves only where a smaller model measured as well.
 ROUTES: Dict[str, str] = {task: "large" for task in TASKS}
+# Rewrites found the expected fact as often from the small model as from the large one (28/30
+# each, and plain search also 28/30).
+ROUTES["query_rewrite"] = "small"
+# The small verifier kept every true sentence and caught every changed fact the large one did
+# (28/28 each, 7 s against 43 s). The test is one change per sentence, so it is a floor.
+ROUTES["verify"] = "small"
 
 
 def routing_mode() -> str:
@@ -43,7 +50,7 @@ def tier_models() -> Dict[str, str]:
     large = os.getenv("RAG_MODEL_LARGE", "").strip() or os.getenv("OLLAMA_MODEL", "qwen3:8b")
     return {
         "small": os.getenv("RAG_MODEL_SMALL", "qwen3:1.7b").strip(),
-        "medium": os.getenv("RAG_MODEL_MEDIUM", "qwen3:4b").strip(),
+        "medium": os.getenv("RAG_MODEL_MEDIUM", "qwen3:4b-instruct").strip(),
         "large": large.strip(),
     }
 

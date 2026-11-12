@@ -37,7 +37,7 @@ def stat(title, expr, unit="short", thresholds=None, desc=""):
     return {
         "type": "stat", "title": title, "description": desc, "datasource": PROM,
         "targets": [target(expr, instant=True)],
-        "fieldConfig": {"defaults": {"unit": unit, "decimals": 1 if unit == "percentunit" else 0,
+        "fieldConfig": {"defaults": {"unit": unit, "decimals": {"percentunit": 1, "currencyUSD": 3}.get(unit, 0),
             "thresholds": {"mode": "absolute", "steps": thresholds or [{"color": "text", "value": None}]}}, "overrides": []},
         "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value", "graphMode": "none", "textMode": "value"},
     }
@@ -117,6 +117,7 @@ add({
     "options": {"showTime": True, "wrapLogMessage": True, "sortOrder": "Descending", "enableLogDetails": True},
 }, 12, y, 12, 10)
 
+y += 10  # past the traces table and the log panel
 add({"type": "row", "title": "What did caching and routing save?", "collapsed": False, "panels": []}, 0, y, 24, 1); y += 1
 add(lstat("Answered from the cache", f'(sum(count_over_time({LINES} | outcome="answered_cached" [$__range])) or vector(0)) / {total}', "percentunit",
           desc="Share of questions served by the answer cache, exact or semantic."), 0, y, 6, 4)

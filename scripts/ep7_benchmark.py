@@ -718,6 +718,71 @@ def run_routing_tasks(bench: Bench) -> Dict[str, Any]:
     return out
 
 
+# --- verify_hard ----------------------------------------------------------------------------
+
+_SWAPS = [("before", "after"), ("minimum", "maximum"), ("CFO", "CEO"), ("Chief Financial Officer", "Chief Executive Officer"),
+          ("mandatory", "optional"), ("suspended", "required"), ("exceeding", "below"), ("prior to", "after"),
+          ("Operations Lead", "Head of Legal"), ("up to", "at least"), ("within", "after")]
+
+
+def _perturb(sentence: str) -> Optional[str]:
+    """One small change that makes the sentence false: a number nudged, or a word swapped."""
+    import re
+
+    match = re.search(r"\d[\d,.]*", sentence)
+    if match:
+        digits = match.group(0)
+        changed = re.sub(r"\d", lambda m: str((int(m.group(0)) + 1) % 10), digits, count=1)
+        return sentence[: match.start()] + changed + sentence[match.end():]
+    for a, b in _SWAPS:
+        if a in sentence:
+            return sentence.replace(a, b, 1)
+    return None
+
+
+def run_verify_hard(bench: Bench) -> Dict[str, Any]:
+    from langchain_ollama import ChatOllama
+
+    from src.config import OLLAMA_BASE_URL
+    from src.rag.multilingual import split_sentences
+    from src.rag.telemetry import genai_handler
+    from src.rag.trust import CitedSentence, LlmClaimVerifier
+
+    tiers = {"small": bench.args.small, "medium": bench.args.medium, "large": bench.args.large}
+    items = []
+    for case in fx.CASES:
+        chunks = bench.ask(case["q"], case["tenant"], mode="fast")["authorized_chunks"]
+        source = next((c["content"] for c in chunks if contains(c["content"], case["expected"])), None)
+        if not source:
+            continue
+        sentence = next((x for x in split_sentences(source) if contains(x, case["expected"])), None)
+        false = _perturb(sentence) if sentence else None
+        if sentence and false and false != sentence:
+            items.append({"case": case["id"], "source": source, "true": sentence, "false": false})
+    out: Dict[str, Any] = {"cases": len(items), "tiers": {}}
+    for tier, model in tiers.items():
+        def factory(**kwargs: Any) -> Any:
+            return ChatOllama(model=model, base_url=OLLAMA_BASE_URL, temperature=0.0, reasoning=False,
+                              callbacks=[genai_handler()], client_kwargs={"timeout": 600})
+        verifier = LlmClaimVerifier(factory)
+        true_ok = false_caught = 0
+        seconds = []
+        for item in items:
+            started = time.perf_counter()
+            try:
+                result = verifier.verify([CitedSentence(item["true"], ["S1"]), CitedSentence(item["false"], ["S1"])], {"S1": item["source"]})
+            except Exception:
+                result = {}
+            seconds.append(time.perf_counter() - started)
+            true_ok += getattr(result.get(1), "label", None) == "supported"
+            false_caught += getattr(result.get(2), "label", None) in {"contradicted", "not_stated"}
+        out["tiers"][tier] = {"model": model, "true_supported": true_ok, "false_caught": false_caught, "cases": len(items),
+                              "mean_seconds": round(statistics.mean(seconds), 2)}
+        print(f"  {tier:<6} {model:<18} true kept {true_ok}/{len(items)}, false caught {false_caught}/{len(items)}, {out['tiers'][tier]['mean_seconds']} s", flush=True)
+    out["examples"] = items[:5]
+    return out
+
+
 # --- cascade --------------------------------------------------------------------------------
 
 
@@ -860,9 +925,12 @@ def run_workload(bench: Bench) -> Dict[str, Any]:
     for t in bench.args.thresholds:
         policies[f"semantic_{t:.2f}"] = ("semantic", t, False)
         policies[f"semantic_{t:.2f}_guard"] = ("semantic", t, True)
-    results = []
-    for zipf_s in bench.args.zipf:
-        stream = traffic(bench.args.requests, zipf_s, seed=7, variant_mix=mix)
+    raw = []
+    zipf_s = bench.args.zipf[1] if len(bench.args.zipf) > 1 else bench.args.zipf[0]
+    # How much traffic repeats depends on how long the stream runs over a fixed set of
+    # questions; the length is the knob, and the result is a curve over the repeat share.
+    for n_requests, seed in [(n, s) for n in bench.args.stream_lengths for s in range(bench.args.seeds)]:
+        stream = traffic(n_requests, zipf_s, seed=100 + seed, variant_mix=mix)
         uncached = {"input": 0, "output": 0, "seconds": 0.0}
         for req in stream:
             a = answers[req["q"]]
@@ -900,17 +968,25 @@ def run_workload(bench: Bench) -> Dict[str, Any]:
                         cache[key] = {"q": req["q"], "answer": a["answer"]}
                 right += ok
                 wrong += (served is not None) and not ok and answers[req["q"]]["correct"]
-            results.append({
-                "zipf_s": zipf_s, "policy": name, "requests": len(stream), "hits": hits, "hit_rate": round(hits / len(stream), 3),
+            raw.append({
+                "zipf_s": zipf_s, "seed": seed, "policy": name, "requests": len(stream), "hits": hits, "hit_rate": round(hits / len(stream), 3),
                 "right": right, "wrong_from_cache": wrong,
                 "input_tokens": spent["input"], "output_tokens": spent["output"], "model_seconds": round(spent["seconds"], 1),
                 "saved_model_seconds": round(uncached["seconds"] - spent["seconds"], 1),
                 "saved_share": round(1 - spent["seconds"] / uncached["seconds"], 3) if uncached["seconds"] else None,
                 "repeat_share": round(1 - len({(r['tenant'], normalize_question(r['q'])) for r in stream}) / len(stream), 3),
             })
+    results = []
+    for n_requests in bench.args.stream_lengths:
+        for name in policies:
+            rows = [r for r in raw if r["requests"] == n_requests and r["policy"] == name]
+            mean = lambda key: round(statistics.mean(r[key] for r in rows), 3)
+            results.append({"requests": n_requests, "policy": name, "seeds": len(rows), "repeat_share": mean("repeat_share"),
+                            "hit_rate": mean("hit_rate"), "saved_share": mean("saved_share"), "right_share": round(statistics.mean(r["right"] / r["requests"] for r in rows), 4),
+                            "wrong_from_cache": mean("wrong_from_cache"), "wrong_from_cache_per_1000": round(1000 * statistics.mean(r["wrong_from_cache"] / r["requests"] for r in rows), 2)})
             r = results[-1]
-            print(f"  zipf={zipf_s} {name:<22} hits {r['hit_rate']:.2f} saved {r['saved_share']} right {r['right']}/{r['requests']} wrong-from-cache {r['wrong_from_cache']}", flush=True)
-    return {"mix": mix, "requests": bench.args.requests, "results": results,
+            print(f"  n={n_requests:<5} {name:<22} repeat {r['repeat_share']:.2f} hits {r['hit_rate']:.2f} saved {r['saved_share']:.3f} right {r['right_share']:.3f} wrong/1000 {r['wrong_from_cache_per_1000']}", flush=True)
+    return {"mix": mix, "zipf_s": zipf_s, "results": results, "runs": raw,
             "note": "Replayed: misses cost what answers.json recorded for that question; a cached answer is right if it contains the incoming question's fact. "
                     "wrong_from_cache counts hits that were wrong where the model's own answer was right."}
 
@@ -982,6 +1058,7 @@ SECTIONS: Dict[str, Callable[[Bench], Dict[str, Any]]] = {
     "answers": run_answers, "embeddings": run_embeddings, "prefix": run_prefix, "cache_safety": run_cache_safety,
     "semantic": run_semantic, "routing_tasks": run_routing_tasks, "cascade": run_cascade, "tokens": run_tokens,
     "llm_cache": run_llm_cache, "workload": run_workload, "live": run_live, "overhead": run_overhead,
+    "verify_hard": run_verify_hard,
 }
 
 
@@ -1016,13 +1093,14 @@ def main() -> None:
     parser.add_argument("--redis", default="redis://localhost:6379/0")
     parser.add_argument("--otlp", default="")
     parser.add_argument("--small", default="qwen3:1.7b")
-    parser.add_argument("--medium", default="qwen3:4b")
+    parser.add_argument("--medium", default="qwen3:4b-instruct")
     parser.add_argument("--large", default="qwen3:8b")
     parser.add_argument("--lab-docs", type=int, default=67)
     parser.add_argument("--qqp", type=int, default=1000)
     parser.add_argument("--token-cases", type=int, default=12)
     parser.add_argument("--llm-cache-cases", type=int, default=6)
-    parser.add_argument("--requests", type=int, default=2000)
+    parser.add_argument("--stream-lengths", type=int, nargs="+", default=[60, 120, 250, 500, 1000, 2000])
+    parser.add_argument("--seeds", type=int, default=5)
     parser.add_argument("--zipf", type=float, nargs="+", default=[0.6, 1.0, 1.4])
     parser.add_argument("--thresholds", type=float, nargs="+", default=[0.80, 0.85, 0.90, 0.95])
     parser.add_argument("--live-requests", type=int, default=60)
