@@ -1,0 +1,90 @@
+{
+  "label": "g1905",
+  "cpu": "AMD Ryzen 9 3900X",
+  "torch": "2.15.0+cpu",
+  "scoring": [
+    {
+      "threads": 12,
+      "batch": 8,
+      "length": 64,
+      "seconds": 5.44,
+      "tokens_per_s": 94.1
+    },
+    {
+      "threads": 12,
+      "batch": 32,
+      "length": 64,
+      "seconds": 21.73,
+      "tokens_per_s": 94.3
+    },
+    {
+      "threads": 12,
+      "batch": 8,
+      "length": 256,
+      "seconds": 21.83,
+      "tokens_per_s": 93.8
+    },
+    {
+      "threads": 16,
+      "batch": 8,
+      "length": 64,
+      "seconds": 5.28,
+      "tokens_per_s": 97.0
+    },
+    {
+      "threads": 16,
+      "batch": 32,
+      "length": 64,
+      "seconds": 20.71,
+      "tokens_per_s": 98.9
+    },
+    {
+      "threads": 16,
+      "batch": 8,
+      "length": 256,
+      "seconds": 21.1,
+      "tokens_per_s": 97.1
+    }
+  ],
+  "sampling": [
+    {
+      "threads": 12,
+      "batch": 1,
+      "new_tokens": 24,
+      "seconds": 13.39,
+      "tokens_per_s": 1.8,
+      "per_stream": 1.79
+    },
+    {
+      "threads": 12,
+      "batch": 16,
+      "new_tokens": 24,
+      "seconds": 24.34,
+      "tokens_per_s": 15.8,
+      "per_stream": 0.99
+    },
+    {
+      "threads": 16,
+      "batch": 1,
+      "new_tokens": 24,
+      "seconds": 14.13,
+      "tokens_per_s": 1.7,
+      "per_stream": 1.7
+    },
+    {
+      "threads": 16,
+      "batch": 16,
+      "new_tokens": 24,
+      "seconds": 25.21,
+      "tokens_per_s": 15.2,
+      "per_stream": 0.95
+    }
+  ],
+  "cached_vs_uncached_max_abs_diff": 7.778406143188477e-06,
+  "example": "The velocity of light, as measured by an observer in uniform motion, \u2016 and aided by the transit instrument, was first communicated by Gauss, and afterwards by Graham; and the practical deduction which",
+  "gate_g0": {
+    "threshold_tokens_per_s": 20,
+    "best_scoring_tokens_per_s": 98.9,
+    "passed": true
+  }
+}
