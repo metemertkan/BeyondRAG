@@ -291,9 +291,1541 @@
           "en_expansion": "CFO approval process"
         }
       ]
+    },
+    "f342e62a9f4f378c": {
+      "filename": "policy_v1_liquidity_table.pdf",
+      "model_used": "ollama/qwen2.5:1.5b",
+      "concepts": [
+        {
+          "concept_id": "concept:f342e6_1",
+          "ja_triggers": [
+            "policy_v1_liquidity_table"
+          ],
+          "ko_triggers": [
+            "policy_v1_liquidity_table"
+          ],
+          "ru_triggers": [
+            "policy_v1_liquidity_table"
+          ],
+          "ar_triggers": [
+            "policy_v1_liquidity_table"
+          ],
+          "zh_triggers": [
+            "policy_v1_liquidity_table"
+          ],
+          "fr_triggers": [
+            "policy_v1_liquidity_table"
+          ],
+          "es_triggers": [
+            "policy_v1_liquidity_table"
+          ],
+          "de_triggers": [
+            "policy_v1_liquidity_table"
+          ],
+          "tr_triggers": [
+            "policy_v1_liquidity_table"
+          ],
+          "en_triggers": [
+            "policy_v1_liquidity_table"
+          ],
+          "en_expansion": "policy_v1_liquidity_table"
+        },
+        {
+          "concept_id": "concept:f342e6_2",
+          "ja_triggers": [
+            "limits"
+          ],
+          "ko_triggers": [
+            "limits"
+          ],
+          "ru_triggers": [
+            "limits"
+          ],
+          "ar_triggers": [
+            "limits"
+          ],
+          "zh_triggers": [
+            "limits"
+          ],
+          "fr_triggers": [
+            "limits"
+          ],
+          "es_triggers": [
+            "limits"
+          ],
+          "de_triggers": [
+            "limits"
+          ],
+          "tr_triggers": [
+            "limits"
+          ],
+          "en_triggers": [
+            "limits"
+          ],
+          "en_expansion": "limits"
+        },
+        {
+          "concept_id": "concept:f342e6_3",
+          "ja_triggers": [
+            "limits"
+          ],
+          "ko_triggers": [
+            "limits"
+          ],
+          "ru_triggers": [
+            "limits"
+          ],
+          "ar_triggers": [
+            "limits"
+          ],
+          "zh_triggers": [
+            "limits"
+          ],
+          "fr_triggers": [
+            "limits"
+          ],
+          "es_triggers": [
+            "limits"
+          ],
+          "de_triggers": [
+            "limits"
+          ],
+          "tr_triggers": [
+            "limits"
+          ],
+          "en_triggers": [
+            "limits"
+          ],
+          "en_expansion": "limits"
+        }
+      ]
+    },
+    "8cf4b0c2c484a989": {
+      "filename": "note.txt",
+      "model_used": "ollama/qwen2.5:1.5b",
+      "concepts": [
+        {
+          "concept_id": "concept:8cf4b0_1",
+          "ja_triggers": [
+            "LCR"
+          ],
+          "ko_triggers": [
+            "LCR"
+          ],
+          "ru_triggers": [
+            "LCR"
+          ],
+          "ar_triggers": [
+            "LCR"
+          ],
+          "zh_triggers": [
+            "LCR"
+          ],
+          "fr_triggers": [
+            "lcr"
+          ],
+          "es_triggers": [
+            "lcr"
+          ],
+          "de_triggers": [
+            "lcr"
+          ],
+          "tr_triggers": [
+            "lcr"
+          ],
+          "en_triggers": [
+            "lcr"
+          ],
+          "en_expansion": "liquidity coverage ratio"
+        },
+        {
+          "concept_id": "concept:8cf4b0_2",
+          "ja_triggers": [
+            "Treasury"
+          ],
+          "ko_triggers": [
+            "Treasury"
+          ],
+          "ru_triggers": [
+            "Treasury"
+          ],
+          "ar_triggers": [
+            "Treasury"
+          ],
+          "zh_triggers": [
+            "Treasury"
+          ],
+          "fr_triggers": [
+            "treasury"
+          ],
+          "es_triggers": [
+            "treasury"
+          ],
+          "de_triggers": [
+            "treasury"
+          ],
+          "tr_triggers": [
+            "treasury"
+          ],
+          "en_triggers": [
+            "treasury"
+          ],
+          "en_expansion": "government treasury"
+        },
+        {
+          "concept_id": "concept:8cf4b0_3",
+          "ja_triggers": [
+            "reserves"
+          ],
+          "ko_triggers": [
+            "reserves"
+          ],
+          "ru_triggers": [
+            "reserves"
+          ],
+          "ar_triggers": [
+            "reserves"
+          ],
+          "zh_triggers": [
+            "reserves"
+          ],
+          "fr_triggers": [
+            "reserves"
+          ],
+          "es_triggers": [
+            "reserves"
+          ],
+          "de_triggers": [
+            "reserves"
+          ],
+          "tr_triggers": [
+            "reserves"
+          ],
+          "en_triggers": [
+            "reserves"
+          ],
+          "en_expansion": "financial reserves"
+        }
+      ]
+    },
+    "e9293c7c6aefd912": {
+      "filename": "policy_mispaired_limits_table.pdf",
+      "model_used": "ollama/qwen2.5:1.5b",
+      "concepts": [
+        {
+          "concept_id": "concept:e9293c_1",
+          "ja_triggers": [
+            "限界種類",
+            "limit type"
+          ],
+          "ko_triggers": [
+            "limit type"
+          ],
+          "ru_triggers": [
+            "limit type"
+          ],
+          "ar_triggers": [
+            "limit type"
+          ],
+          "zh_triggers": [
+            "限界種類",
+            "limit type"
+          ],
+          "fr_triggers": [
+            "type limite",
+            "limit type"
+          ],
+          "es_triggers": [
+            "tipo límite",
+            "limit type"
+          ],
+          "de_triggers": [
+            "limit type"
+          ],
+          "tr_triggers": [
+            "limit type"
+          ],
+          "en_triggers": [
+            "limit type"
+          ],
+          "en_expansion": "limit type"
+        },
+        {
+          "concept_id": "concept:e9293c_2",
+          "ja_triggers": [
+            "限界値",
+            "threshold"
+          ],
+          "ko_triggers": [
+            "threshold"
+          ],
+          "ru_triggers": [
+            "threshold"
+          ],
+          "ar_triggers": [
+            "threshold"
+          ],
+          "zh_triggers": [
+            "限界値",
+            "threshold"
+          ],
+          "fr_triggers": [
+            "threshold"
+          ],
+          "es_triggers": [
+            "límite",
+            "threshold"
+          ],
+          "de_triggers": [
+            "threshold"
+          ],
+          "tr_triggers": [
+            "threshold"
+          ],
+          "en_triggers": [
+            "threshold"
+          ],
+          "en_expansion": "threshold"
+        },
+        {
+          "concept_id": "concept:e9293c_3",
+          "ja_triggers": [
+            "限界",
+            "limit"
+          ],
+          "ko_triggers": [
+            "limit"
+          ],
+          "ru_triggers": [
+            "limit"
+          ],
+          "ar_triggers": [
+            "limit"
+          ],
+          "zh_triggers": [
+            "限界",
+            "limit"
+          ],
+          "fr_triggers": [
+            "limit"
+          ],
+          "es_triggers": [
+            "límite",
+            "limit"
+          ],
+          "de_triggers": [
+            "limit"
+          ],
+          "tr_triggers": [
+            "limit"
+          ],
+          "en_triggers": [
+            "limit"
+          ],
+          "en_expansion": "limit"
+        }
+      ]
+    },
+    "11627b555964e07b": {
+      "filename": "note.txt",
+      "model_used": "ollama/qwen2.5:1.5b",
+      "concepts": [
+        {
+          "concept_id": "concept:11627b_1",
+          "ja_triggers": [
+            "liquidity buffer policy"
+          ],
+          "ko_triggers": [
+            "liquidity buffer policy"
+          ],
+          "ru_triggers": [
+            "liquidity buffer policy"
+          ],
+          "ar_triggers": [
+            "liquidity buffer policy"
+          ],
+          "zh_triggers": [
+            "liquidity buffer policy"
+          ],
+          "fr_triggers": [
+            "liquidity buffer policy"
+          ],
+          "es_triggers": [
+            "liquidity buffer policy"
+          ],
+          "de_triggers": [
+            "liquidity buffer policy"
+          ],
+          "tr_triggers": [
+            "liquidity buffer policy"
+          ],
+          "en_triggers": [
+            "liquidity buffer policy"
+          ],
+          "en_expansion": "liquidity buffer policy"
+        },
+        {
+          "concept_id": "concept:11627b_2",
+          "ja_triggers": [
+            "policy text"
+          ],
+          "ko_triggers": [
+            "policy text"
+          ],
+          "ru_triggers": [
+            "policy text"
+          ],
+          "ar_triggers": [
+            "policy text"
+          ],
+          "zh_triggers": [
+            "policy text"
+          ],
+          "fr_triggers": [
+            "policy text"
+          ],
+          "es_triggers": [
+            "policy text"
+          ],
+          "de_triggers": [
+            "policy text"
+          ],
+          "tr_triggers": [
+            "policy text"
+          ],
+          "en_triggers": [
+            "policy text"
+          ],
+          "en_expansion": "policy text"
+        },
+        {
+          "concept_id": "concept:11627b_3",
+          "ja_triggers": [
+            "policy"
+          ],
+          "ko_triggers": [
+            "policy"
+          ],
+          "ru_triggers": [
+            "policy"
+          ],
+          "ar_triggers": [
+            "policy"
+          ],
+          "zh_triggers": [
+            "policy"
+          ],
+          "fr_triggers": [
+            "policy"
+          ],
+          "es_triggers": [
+            "policy"
+          ],
+          "de_triggers": [
+            "policy"
+          ],
+          "tr_triggers": [
+            "policy"
+          ],
+          "en_triggers": [
+            "policy"
+          ],
+          "en_expansion": "policy"
+        }
+      ]
+    },
+    "1446a3465ae74533": {
+      "filename": "a.txt",
+      "model_used": "ollama/qwen2.5:1.5b",
+      "concepts": [
+        {
+          "concept_id": "concept:1446a3_1",
+          "ja_triggers": [
+            "合同"
+          ],
+          "ko_triggers": [
+            "계약"
+          ],
+          "ru_triggers": [
+            "контракт"
+          ],
+          "ar_triggers": [
+            "عقد"
+          ],
+          "zh_triggers": [
+            "合同"
+          ],
+          "fr_triggers": [
+            "contrat"
+          ],
+          "es_triggers": [
+            "contrato"
+          ],
+          "de_triggers": [
+            "kontakt"
+          ],
+          "tr_triggers": [
+            "توسط"
+          ],
+          "en_triggers": [
+            "contract"
+          ],
+          "en_expansion": "contract"
+        },
+        {
+          "concept_id": "concept:1446a3_2",
+          "ja_triggers": [
+            "偽"
+          ],
+          "ko_triggers": [
+            "偽"
+          ],
+          "ru_triggers": [
+            "контракт"
+          ],
+          "ar_triggers": [
+            "false"
+          ],
+          "zh_triggers": [
+            "偽"
+          ],
+          "fr_triggers": [
+            "faux"
+          ],
+          "es_triggers": [
+            "falso"
+          ],
+          "de_triggers": [
+            "fals"
+          ],
+          "tr_triggers": [
+            "faal"
+          ],
+          "en_triggers": [
+            "fake"
+          ],
+          "en_expansion": "fake"
+        },
+        {
+          "concept_id": "concept:1446a3_3",
+          "ja_triggers": [
+            "32"
+          ],
+          "ko_triggers": [
+            "32"
+          ],
+          "ru_triggers": [
+            "32"
+          ],
+          "ar_triggers": [
+            "32"
+          ],
+          "zh_triggers": [
+            "32"
+          ],
+          "fr_triggers": [
+            "32"
+          ],
+          "es_triggers": [
+            "32"
+          ],
+          "de_triggers": [
+            "32"
+          ],
+          "tr_triggers": [
+            "32"
+          ],
+          "en_triggers": [
+            "32"
+          ],
+          "en_expansion": "32"
+        }
+      ]
+    },
+    "f46184d09a006990": {
+      "filename": "fin.txt",
+      "model_used": "ollama/qwen2.5:1.5b",
+      "concepts": [
+        {
+          "concept_id": "concept:f46184_1",
+          "ja_triggers": [
+            "forward",
+            "約定",
+            "約定"
+          ],
+          "ko_triggers": [
+            "forward",
+            "예약",
+            "예약"
+          ],
+          "ru_triggers": [
+            "forward",
+            "заказ",
+            "заказ"
+          ],
+          "ar_triggers": [
+            "forward",
+            "التزمت",
+            "التزمت"
+          ],
+          "zh_triggers": [
+            "forward",
+            "合约",
+            "合约"
+          ],
+          "fr_triggers": [
+            "forward",
+            "contrats",
+            "contrats"
+          ],
+          "es_triggers": [
+            "forward",
+            "contratos",
+            "contratos"
+          ],
+          "de_triggers": [
+            "forward",
+            "forder",
+            "forder"
+          ],
+          "tr_triggers": [
+            "forward",
+            "forward",
+            "forward"
+          ],
+          "en_triggers": [
+            "forward",
+            "forward",
+            "forward"
+          ],
+          "en_expansion": "forward contracts"
+        },
+        {
+          "concept_id": "concept:f46184_2",
+          "ja_triggers": [
+            "approval",
+            "承認",
+            "承認"
+          ],
+          "ko_triggers": [
+            "approval",
+            "승인",
+            "승인"
+          ],
+          "ru_triggers": [
+            "approval",
+            "подтверждение",
+            "подтверждение"
+          ],
+          "ar_triggers": [
+            "approval",
+            "الاعتماد",
+            "الاعتماد"
+          ],
+          "zh_triggers": [
+            "approval",
+            "批准",
+            "批准"
+          ],
+          "fr_triggers": [
+            "approval",
+            "approbation",
+            "approbation"
+          ],
+          "es_triggers": [
+            "approval",
+            "aceptación",
+            "aceptación"
+          ],
+          "de_triggers": [
+            "approval",
+            "bestätigung",
+            "bestätigung"
+          ],
+          "tr_triggers": [
+            "approval",
+            "approval",
+            "approval"
+          ],
+          "en_triggers": [
+            "approval",
+            "approval",
+            "approval"
+          ],
+          "en_expansion": "approval"
+        }
+      ]
+    },
+    "749e68b5cdb92194": {
+      "filename": "limits.md",
+      "model_used": "ollama/qwen2.5:1.5b",
+      "concepts": [
+        {
+          "concept_id": "concept:749e68_1",
+          "ja_triggers": [
+            "kw"
+          ],
+          "ko_triggers": [
+            "kw"
+          ],
+          "ru_triggers": [
+            "kw"
+          ],
+          "ar_triggers": [
+            "kw"
+          ],
+          "zh_triggers": [
+            "kw"
+          ],
+          "fr_triggers": [
+            "kw"
+          ],
+          "es_triggers": [
+            "kw"
+          ],
+          "de_triggers": [
+            "kw"
+          ],
+          "tr_triggers": [
+            "kw"
+          ],
+          "en_triggers": [
+            "kw"
+          ],
+          "en_expansion": "english keywords"
+        }
+      ]
+    },
+    "402b6297e16f8838": {
+      "filename": "note.txt",
+      "model_used": "ollama/qwen2.5:1.5b",
+      "concepts": [
+        {
+          "concept_id": "concept:402b62_1",
+          "ja_triggers": [
+            "liquidity note"
+          ],
+          "ko_triggers": [
+            "liquidity note"
+          ],
+          "ru_triggers": [
+            "liquidity note"
+          ],
+          "ar_triggers": [
+            "liquidity note"
+          ],
+          "zh_triggers": [
+            "liquidity note"
+          ],
+          "fr_triggers": [
+            "liquidity note"
+          ],
+          "es_triggers": [
+            "liquidity note"
+          ],
+          "de_triggers": [
+            "liquidity note"
+          ],
+          "tr_triggers": [
+            "liquidity note"
+          ],
+          "en_triggers": [
+            "liquidity note"
+          ],
+          "en_expansion": "liquidity note"
+        }
+      ]
     }
   },
   "query_cache": {
     "八號風球考勤": "8号风球 attendance"
+  },
+  "tenants": {
+    "acme": {
+      "documents": {
+        "bb0b2b4a9b19e009": {
+          "filename": "Cross_Border_CapEx_Procurement_Matrix.pdf",
+          "model_used": "ollama/qwen2.5:1.5b",
+          "concepts": [
+            {
+              "concept_id": "concept:bb0b2b_1",
+              "ja_triggers": [
+                "GBA_warehouse_automation"
+              ],
+              "ko_triggers": [
+                "GBA_warehouse_automation"
+              ],
+              "ru_triggers": [
+                "GBA_warehouse_automation"
+              ],
+              "ar_triggers": [
+                "GBA_warehouse_automation"
+              ],
+              "zh_triggers": [
+                "GBA_warehouse_automation"
+              ],
+              "fr_triggers": [
+                "gba_warehouse_automation"
+              ],
+              "es_triggers": [
+                "gba_warehouse_automation"
+              ],
+              "de_triggers": [
+                "gba_warehouse_automation"
+              ],
+              "tr_triggers": [
+                "gba_warehouse_automation"
+              ],
+              "en_triggers": [
+                "gba_warehouse_automation"
+              ],
+              "en_expansion": "Greater Bay Area (GBA) Warehouse Automation CapEx Thresholds"
+            },
+            {
+              "concept_id": "concept:bb0b2b_2",
+              "ja_triggers": [
+                "AMRs"
+              ],
+              "ko_triggers": [
+                "AMRs"
+              ],
+              "ru_triggers": [
+                "AMRs"
+              ],
+              "ar_triggers": [
+                "AMRs"
+              ],
+              "zh_triggers": [
+                "AMRs"
+              ],
+              "fr_triggers": [
+                "amrs"
+              ],
+              "es_triggers": [
+                "amrs"
+              ],
+              "de_triggers": [
+                "amrs"
+              ],
+              "tr_triggers": [
+                "amrs"
+              ],
+              "en_triggers": [
+                "amrs"
+              ],
+              "en_expansion": "autonomous mobile robots (AMRs)"
+            },
+            {
+              "concept_id": "concept:bb0b2b_3",
+              "ja_triggers": [
+                "warehouse_conveyors"
+              ],
+              "ko_triggers": [
+                "warehouse_conveyors"
+              ],
+              "ru_triggers": [
+                "warehouse_conveyors"
+              ],
+              "ar_triggers": [
+                "warehouse_conveyors"
+              ],
+              "zh_triggers": [
+                "warehouse_conveyors"
+              ],
+              "fr_triggers": [
+                "warehouse_conveyors"
+              ],
+              "es_triggers": [
+                "warehouse_conveyors"
+              ],
+              "de_triggers": [
+                "warehouse_conveyors"
+              ],
+              "tr_triggers": [
+                "warehouse_conveyors"
+              ],
+              "en_triggers": [
+                "warehouse_conveyors"
+              ],
+              "en_expansion": "warehouse conveyors"
+            }
+          ]
+        },
+        "2165155419be3771": {
+          "filename": "HK_Treasury_FX_Liquidity_Policy_Q4.pdf",
+          "model_used": "ollama/qwen3:8b",
+          "concepts": [
+            {
+              "concept_id": "concept:216515_1",
+              "ja_triggers": [
+                "LCR"
+              ],
+              "ko_triggers": [
+                "LCR"
+              ],
+              "ru_triggers": [
+                "LCR"
+              ],
+              "ar_triggers": [
+                "LCR"
+              ],
+              "zh_triggers": [
+                "LCR"
+              ],
+              "fr_triggers": [
+                "lcr"
+              ],
+              "es_triggers": [
+                "lcr"
+              ],
+              "de_triggers": [
+                "lcr"
+              ],
+              "tr_triggers": [
+                "lcr"
+              ],
+              "en_triggers": [
+                "lcr"
+              ],
+              "en_expansion": "Liquidity Coverage Ratio"
+            },
+            {
+              "concept_id": "concept:216515_2",
+              "ja_triggers": [
+                "FX",
+                "ヘッジ"
+              ],
+              "ko_triggers": [
+                "FX",
+                "헤지"
+              ],
+              "ru_triggers": [
+                "FX",
+                "хедж"
+              ],
+              "ar_triggers": [
+                "العملة",
+                "الhedging"
+              ],
+              "zh_triggers": [
+                "外汇",
+                "对冲"
+              ],
+              "fr_triggers": [
+                "change",
+                "hedging"
+              ],
+              "es_triggers": [
+                "divisa",
+                "hedging"
+              ],
+              "de_triggers": [
+                "währung",
+                "hedging"
+              ],
+              "tr_triggers": [
+                "döviz",
+                "hedging"
+              ],
+              "en_triggers": [
+                "fx",
+                "hedging"
+              ],
+              "en_expansion": "Foreign Exchange Hedging Policy"
+            },
+            {
+              "concept_id": "concept:216515_3",
+              "ja_triggers": [
+                "NIM",
+                "報告"
+              ],
+              "ko_triggers": [
+                "NIM",
+                "보고"
+              ],
+              "ru_triggers": [
+                "NIM",
+                "отчет"
+              ],
+              "ar_triggers": [
+                "NIM",
+                "التقارير"
+              ],
+              "zh_triggers": [
+                "净息差",
+                "报告"
+              ],
+              "fr_triggers": [
+                "nim",
+                "rapport"
+              ],
+              "es_triggers": [
+                "nim",
+                "informe"
+              ],
+              "de_triggers": [
+                "nim",
+                "bericht"
+              ],
+              "tr_triggers": [
+                "nim",
+                "rapor"
+              ],
+              "en_triggers": [
+                "nim",
+                "reporting"
+              ],
+              "en_expansion": "Net Interest Margin Reporting"
+            }
+          ]
+        },
+        "d5c0e061852b4044": {
+          "filename": "HK_Enterprise_Public_Handbook_2026.pdf",
+          "model_used": "ollama/qwen3:8b",
+          "concepts": [
+            {
+              "concept_id": "concept:d5c0e0_1",
+              "ja_triggers": [
+                "ワークプレイスポリシー"
+              ],
+              "ko_triggers": [
+                "워크플레이스정책"
+              ],
+              "ru_triggers": [
+                "политикарабочегоместа"
+              ],
+              "ar_triggers": [
+                "سياسةالعمل"
+              ],
+              "zh_triggers": [
+                "工作场所政策"
+              ],
+              "fr_triggers": [
+                "politique_du_lieu_de_travail"
+              ],
+              "es_triggers": [
+                "política_de_ubicación_de_trabajo"
+              ],
+              "de_triggers": [
+                "arbeitsplatzpolitik"
+              ],
+              "tr_triggers": [
+                "işyeri_politikası"
+              ],
+              "en_triggers": [
+                "workplace policy"
+              ],
+              "en_expansion": "english keywords"
+            },
+            {
+              "concept_id": "concept:d5c0e0_2",
+              "ja_triggers": [
+                "リモートワークプロトコル"
+              ],
+              "ko_triggers": [
+                "리모트워크프로토콜"
+              ],
+              "ru_triggers": [
+                "протоколудалеработы"
+              ],
+              "ar_triggers": [
+                "بروتوكولالعملالعنكبوتي"
+              ],
+              "zh_triggers": [
+                "远程工作协议"
+              ],
+              "fr_triggers": [
+                "protocole_de_travail_à_distance"
+              ],
+              "es_triggers": [
+                "protocolo_de_trabajo_remoto"
+              ],
+              "de_triggers": [
+                "remotearbeitsprotokoll"
+              ],
+              "tr_triggers": [
+                "uzaktançalışma_protokolü"
+              ],
+              "en_triggers": [
+                "remote work protocol"
+              ],
+              "en_expansion": "english keywords"
+            },
+            {
+              "concept_id": "concept:d5c0e0_3",
+              "ja_triggers": [
+                "ITサポートアクセス"
+              ],
+              "ko_triggers": [
+                "IT지원접근"
+              ],
+              "ru_triggers": [
+                "доступкоИТподдержке"
+              ],
+              "ar_triggers": [
+                "الوصولإلىدعمالإنترنت"
+              ],
+              "zh_triggers": [
+                "IT支持访问"
+              ],
+              "fr_triggers": [
+                "accès_au_service_d'assistance_it"
+              ],
+              "es_triggers": [
+                "acceso_al_servicio_de_soporte_it"
+              ],
+              "de_triggers": [
+                "it-unterstützungszugang"
+              ],
+              "tr_triggers": [
+                "it_destek_erişimi"
+              ],
+              "en_triggers": [
+                "it support access"
+              ],
+              "en_expansion": "english keywords"
+            }
+          ]
+        },
+        "271e05e482e2f105": {
+          "filename": "Global_Supply_Chain_Terminal_SOP.pdf",
+          "model_used": "ollama/qwen3:8b",
+          "concepts": [
+            {
+              "concept_id": "concept:271e05_1",
+              "ja_triggers": [
+                "ディスパッチSLA"
+              ],
+              "ko_triggers": [
+                "디스패치 SLA"
+              ],
+              "ru_triggers": [
+                "диспетчерский SLA"
+              ],
+              "ar_triggers": [
+                "SLA للإطلاق"
+              ],
+              "zh_triggers": [
+                "调度SLA"
+              ],
+              "fr_triggers": [
+                "sla de dispatch"
+              ],
+              "es_triggers": [
+                "sla de despacho"
+              ],
+              "de_triggers": [
+                "dispatch sla"
+              ],
+              "tr_triggers": [
+                "dispatch sla"
+              ],
+              "en_triggers": [
+                "dispatch sla"
+              ],
+              "en_expansion": "dispatch SLA"
+            },
+            {
+              "concept_id": "concept:271e05_2",
+              "ja_triggers": [
+                "冷蔵連鎖プロトコル"
+              ],
+              "ko_triggers": [
+                "냉장 체인 프로토콜"
+              ],
+              "ru_triggers": [
+                "протокол холодной цепи"
+              ],
+              "ar_triggers": [
+                "بروتوكول سلسلة التبريد"
+              ],
+              "zh_triggers": [
+                "冷链协议"
+              ],
+              "fr_triggers": [
+                "protocole de chaîne froide"
+              ],
+              "es_triggers": [
+                "protocolo de cadena fría"
+              ],
+              "de_triggers": [
+                "kaltkettenprotokoll"
+              ],
+              "tr_triggers": [
+                "soğuk zincir protokolü"
+              ],
+              "en_triggers": [
+                "cold chain protocol"
+              ],
+              "en_expansion": "cold chain protocol"
+            },
+            {
+              "concept_id": "concept:271e05_3",
+              "ja_triggers": [
+                "国境越しの検査"
+              ],
+              "ko_triggers": [
+                "국경을 넘는 검사"
+              ],
+              "ru_triggers": [
+                "пропуск через границу"
+              ],
+              "ar_triggers": [
+                "التحقق عبر الحدود"
+              ],
+              "zh_triggers": [
+                "跨境清关"
+              ],
+              "fr_triggers": [
+                "démarche transfrontalière"
+              ],
+              "es_triggers": [
+                "verificación transfronteriza"
+              ],
+              "de_triggers": [
+                "überlandkontrolle"
+              ],
+              "tr_triggers": [
+                "araştırma geçişi"
+              ],
+              "en_triggers": [
+                "cross-boundary clearance"
+              ],
+              "en_expansion": "cross-boundary clearance"
+            }
+          ]
+        }
+      },
+      "query_cache": {}
+    },
+    "globex": {
+      "documents": {
+        "9e8e738032974ec0": {
+          "filename": "Globex_Employee_Handbook_2026.pdf",
+          "model_used": "ollama/qwen3:8b",
+          "concepts": [
+            {
+              "concept_id": "concept:9e8e73_1",
+              "ja_triggers": [
+                "ワークプレイスポリシー"
+              ],
+              "ko_triggers": [
+                "워크플레이스 정책"
+              ],
+              "ru_triggers": [
+                "политика рабочего места"
+              ],
+              "ar_triggers": [
+                "سياسة مكان العمل"
+              ],
+              "zh_triggers": [
+                "工作场所政策"
+              ],
+              "fr_triggers": [
+                "politique de lieu de travail"
+              ],
+              "es_triggers": [
+                "política de lugar de trabajo"
+              ],
+              "de_triggers": [
+                "arbeitsplatzpolitik"
+              ],
+              "tr_triggers": [
+                "işyeri politikası"
+              ],
+              "en_triggers": [
+                "workplace policy"
+              ],
+              "en_expansion": "workplace policy"
+            },
+            {
+              "concept_id": "concept:9e8e73_2",
+              "ja_triggers": [
+                "ハイブリッド出勤"
+              ],
+              "ko_triggers": [
+                "하이브리드 출근"
+              ],
+              "ru_triggers": [
+                "гибридный режим работы"
+              ],
+              "ar_triggers": [
+                "الحضور الهجين"
+              ],
+              "zh_triggers": [
+                "混合出勤"
+              ],
+              "fr_triggers": [
+                "présence hybride"
+              ],
+              "es_triggers": [
+                "asistencia híbrida"
+              ],
+              "de_triggers": [
+                "hybride arbeitszeit"
+              ],
+              "tr_triggers": [
+                "hibrit çalışma"
+              ],
+              "en_triggers": [
+                "hybrid attendance"
+              ],
+              "en_expansion": "hybrid attendance"
+            },
+            {
+              "concept_id": "concept:9e8e73_3",
+              "ja_triggers": [
+                "リモートワークモード"
+              ],
+              "ko_triggers": [
+                "리모트 워크 모드"
+              ],
+              "ru_triggers": [
+                "режим удаленной работы"
+              ],
+              "ar_triggers": [
+                "وضع العمل عن بعد"
+              ],
+              "zh_triggers": [
+                "远程工作模式"
+              ],
+              "fr_triggers": [
+                "mode de travail à distance"
+              ],
+              "es_triggers": [
+                "modo de trabajo remoto"
+              ],
+              "de_triggers": [
+                "remote-modus"
+              ],
+              "tr_triggers": [
+                "uzaktan çalışma modu"
+              ],
+              "en_triggers": [
+                "remote work mode"
+              ],
+              "en_expansion": "remote work mode"
+            }
+          ]
+        },
+        "1a0d9df6c5b2e391": {
+          "filename": "Globex_Treasury_Liquidity_Policy_Q4.pdf",
+          "model_used": "ollama/qwen3:8b",
+          "concepts": [
+            {
+              "concept_id": "concept:1a0d9d_1",
+              "ja_triggers": [
+                "最小現金バッファ"
+              ],
+              "ko_triggers": [
+                "최소 현금 버퍼"
+              ],
+              "ru_triggers": [
+                "минимальный денежный буфер"
+              ],
+              "ar_triggers": [
+                "الحد الأدنى من السيولة النقدية"
+              ],
+              "zh_triggers": [
+                "最低现金缓冲"
+              ],
+              "fr_triggers": [
+                "tranche de liquidité minimale"
+              ],
+              "es_triggers": [
+                "buffer de efectivo mínimo"
+              ],
+              "de_triggers": [
+                "minimaler bargeldpuffer"
+              ],
+              "tr_triggers": [
+                "minimum nakit bariyeri"
+              ],
+              "en_triggers": [
+                "minimum cash buffer"
+              ],
+              "en_expansion": "minimum cash buffer policy"
+            },
+            {
+              "concept_id": "concept:1a0d9d_2",
+              "ja_triggers": [
+                "為替ヘッジ要件"
+              ],
+              "ko_triggers": [
+                "외환 헤지 요구사항"
+              ],
+              "ru_triggers": [
+                "требования к фьючерсному хеджированию"
+              ],
+              "ar_triggers": [
+                "متطلبات تغطية العملة الأجنبية"
+              ],
+              "zh_triggers": [
+                "外汇对冲要求"
+              ],
+              "fr_triggers": [
+                "exigences de couverture des changes"
+              ],
+              "es_triggers": [
+                "requisitos de cobertura cambiaria"
+              ],
+              "de_triggers": [
+                "anforderungen an die währungshedging"
+              ],
+              "tr_triggers": [
+                "döviz hedging gereklilikleri"
+              ],
+              "en_triggers": [
+                "fx hedging requirements"
+              ],
+              "en_expansion": "foreign exchange hedging policy"
+            },
+            {
+              "concept_id": "concept:1a0d9d_3",
+              "ja_triggers": [
+                "プロジェクトナイトジャラ取得予算"
+              ],
+              "ko_triggers": [
+                "프로젝트 나이트저 acquisition 예산"
+              ],
+              "ru_triggers": [
+                "бюджет приобретения проекта Nightjar"
+              ],
+              "ar_triggers": [
+                "ميزانية اكتساب مشروع Nightjar"
+              ],
+              "zh_triggers": [
+                "项目夜莺收购预算"
+              ],
+              "fr_triggers": [
+                "budget d'acquisition du projet nightjar"
+              ],
+              "es_triggers": [
+                "presupuesto de adquisición del proyecto nightjar"
+              ],
+              "de_triggers": [
+                "acquisitionsbudget für projekt nightjar"
+              ],
+              "tr_triggers": [
+                "project nightjar acquisition bütçesi"
+              ],
+              "en_triggers": [
+                "project nightjar acquisition budget"
+              ],
+              "en_expansion": "project nightjar acquisition budget"
+            }
+          ]
+        },
+        "df300fc4b060ebe9": {
+          "filename": "Globex_Warehouse_Operations_SOP.pdf",
+          "model_used": "ollama/qwen3:8b",
+          "concepts": [
+            {
+              "concept_id": "concept:df300f_1",
+              "ja_triggers": [
+                "マースヴラakteターミナルディスパッチ"
+              ],
+              "ko_triggers": [
+                "메이스브라akte 타ーミ널 디스패치"
+              ],
+              "ru_triggers": [
+                "Маасвлаакте терминал диспетчер"
+              ],
+              "ar_triggers": [
+                "ماسفلakte تيرمينال ديس باش"
+              ],
+              "zh_triggers": [
+                "马斯弗拉akte终端调度"
+              ],
+              "fr_triggers": [
+                "dispatch du terminal maasvlakte"
+              ],
+              "es_triggers": [
+                "dispatch del terminal maasvlakte"
+              ],
+              "de_triggers": [
+                "maasvlakte terminal dispatch"
+              ],
+              "tr_triggers": [
+                "maasvlakte terminal dispatch"
+              ],
+              "en_triggers": [
+                "maasvlakte terminal dispatch"
+              ],
+              "en_expansion": "Maasvlakte Terminal Dispatch"
+            },
+            {
+              "concept_id": "concept:df300f_2",
+              "ja_triggers": [
+                "コンテナ滞在時間"
+              ],
+              "ko_triggers": [
+                "컨테이너 체류 시간"
+              ],
+              "ru_triggers": [
+                "время пребывания контейнера"
+              ],
+              "ar_triggers": [
+                "وقت إقامة الحاوية"
+              ],
+              "zh_triggers": [
+                "集装箱停留时间"
+              ],
+              "fr_triggers": [
+                "temps de séjour du conteneur"
+              ],
+              "es_triggers": [
+                "tiempo de estancia del contenedor"
+              ],
+              "de_triggers": [
+                "container-dwell-zeit"
+              ],
+              "tr_triggers": [
+                "konteyner dwell zamanı"
+              ],
+              "en_triggers": [
+                "container dwell time"
+              ],
+              "en_expansion": "container dwell time"
+            },
+            {
+              "concept_id": "concept:df300f_3",
+              "ja_triggers": [
+                "コールチェーンプロトコル"
+              ],
+              "ko_triggers": [
+                "콜체인 프로토콜"
+              ],
+              "ru_triggers": [
+                "холодная цепь протокол"
+              ],
+              "ar_triggers": [
+                "بروتوكول سلسلة البارد"
+              ],
+              "zh_triggers": [
+                "冷链协议"
+              ],
+              "fr_triggers": [
+                "protocole de chaîne froide"
+              ],
+              "es_triggers": [
+                "protocolo de cadena fría"
+              ],
+              "de_triggers": [
+                "kaltkettenprotokoll"
+              ],
+              "tr_triggers": [
+                "soğuk zincir protokolü"
+              ],
+              "en_triggers": [
+                "cold-chain protocol"
+              ],
+              "en_expansion": "cold-chain protocol"
+            }
+          ]
+        }
+      },
+      "query_cache": {}
+    }
   }
 }

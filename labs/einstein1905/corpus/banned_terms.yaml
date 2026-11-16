@@ -1,0 +1,58 @@
+# Terms that show a text was written, edited or annotated after the cutoff (31 May 1905).
+# Used by corpus/scan.py for corpus documents and for the prompts sent to historical models.
+#
+# Each entry is a regular expression. `i: true` makes it case-insensitive.
+# Capitalised historical names stay case-sensitive: "the great war with France" is fine in 1880.
+
+reject:
+  - {name: "theory of relativity", re: 'theory\s+of\s+relativity', i: true}
+  - {name: "Lorentz transformation", re: 'Lorentz[\s-]+transformation', i: true}
+  - {name: "space-time", re: 'space-time', i: true}
+  - {name: "spacetime", re: 'spacetime', i: true}
+  - {name: "relativistic", re: 'relativistic', i: true}
+  - {name: "photon", re: '\bphotons?\b', i: true}
+  - {name: "quantum theory", re: 'quantum\s+theory', i: true}
+  - {name: "quantum mechanics", re: 'quantum\s+mechanics', i: true}
+  - {name: "E = mc", re: 'E\s*=\s*mc'}
+  - {name: "world-line", re: 'world-lines?\b', i: true}
+  - {name: "atomic nucleus", re: 'atomic\s+nucle(us|i)', i: true}
+  - {name: "isotope", re: '\bisotop', i: true}
+  - {name: "Great War", re: '\bGreat\s+War\b'}
+  - {name: "World War", re: '\bWorld\s+War\b'}
+  - {name: "Bolshevik", re: 'Bolshevi', i: true}
+  - {name: "the Titanic", re: '\bthe\s+Titanic\b'}
+  - {name: "George V", re: '\bGeorge\s+V\b'}
+  - {name: "vitamin", re: '\bvitamin', i: true}
+  - {name: "television", re: '\btelevision', i: true}
+  - {name: "Project Gutenberg", re: 'Project\s+Gutenberg', i: true}
+  - {name: "Internet Archive", re: 'Internet\s+Archive', i: true}
+  - {name: "ISBN", re: '\bISBN\b'}
+  - {name: "http", re: 'https?:', i: true}
+  - {name: "www.", re: 'www\.', i: true}
+  - {name: "Dover Publications", re: 'Dover\s+Publications', i: true}
+
+# These names have legitimate uses before 1905, so a hit is read by a person, not rejected.
+flag:
+  - {name: "Einstein", re: '\bEinstein'}
+  - {name: "Minkowski", re: '\bMinkowski'}
+  - {name: "Soviet", re: '\bSoviet'}
+  - {name: "Bohr", re: '\bBohr\b'}
+  - {name: "Rutherford near nucleus", re: 'Rutherford[\s\S]{0,200}nucle(us|i)|nucle(us|i)[\s\S]{0,200}Rutherford'}
+
+# A document with this many matches of a year after the cutoff is flagged.
+late_year:
+  re: '\b(190[6-9]|19[1-9]\d|20\d\d)\b'
+  min_matches: 3
+
+# Extra words for my own prompts and letters (plan 9.3): hindsight vocabulary that a writer
+# of 1905 would not use in this sense. A hit fails the probe build.
+prompt_only:
+  - {name: "frame (of reference)", re: '\bframes?\b', i: true}
+  - {name: "invariant", re: '\binvarian', i: true}
+  - {name: "time dilation", re: 'time[\s-]+dilat', i: true}
+  - {name: "event", re: '\bevents?\b', i: true}
+  - {name: "observer-dependent", re: 'observer-dependent', i: true}
+  - {name: "inertial", re: '\binertial\b', i: true}
+  - {name: "simultaneity of relativity", re: 'relativity\s+of\s+simultaneity', i: true}
+  - {name: "rest mass", re: 'rest[\s-]+mass', i: true}
+  - {name: "light-cone", re: 'light[\s-]+cone', i: true}

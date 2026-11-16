@@ -13,6 +13,7 @@ Most RAG tutorials stop at chunking a single PDF for a single user. A company-wi
 | [**#05**](#episode-5--multi-tenant-isolation) | Multi-tenant isolation | Signed identity, a required tenant scope on every read and write, pool and silo index layouts, tenant offboarding, 22 cross-tenant attacks run before and after |
 | [**#06**](#episode-6--observability-and-guardrails) | Observability and guardrails | OpenTelemetry traces and token metrics for every model call, one outcome label per answer, a local Grafana stack, business guardrails, a daily token budget per tenant |
 | [**#07**](#episode-7--reducing-llm-costs) | Reducing LLM costs | Embedding cache and batching, an answer cache scoped by tenant, roles and corpus version, a guarded semantic cache, model routing and a cascade, prompt and token optimization, measured against answer quality |
+| [**#08**](#episode-8--the-hallucination-checker-vs-einstein) | The hallucination checker vs. Einstein | The Episode 4 checker run on Einstein's 1905 relativity paper, against libraries of physics dated June 1905 to 1921; every verdict read |
 | [**#09**](#episode-9--running-beyondrag-on-aws) | Running BeyondRAG on AWS | CloudFormation for ECS, RDS, OpenSearch, ElastiCache, Managed Grafana and S3 over two Regions, checked locally on the new AWS Emulator |
 
 ---
@@ -704,6 +705,56 @@ The token count doesn't change; only the time shows it. Ollama kept both prompts
 
 ---
 
+## Episode 8 — The Hallucination Checker vs. Einstein
+
+> **In one sentence:** I gave an AI fact-checker only what was known in 1905. It rejected Einstein and approved the ether, because a fact-checker doesn't check what's true. It checks what's already written.
+
+Episode 4 built a checker that labels every sentence supported, contradicted or not stated by the sources. Anything not supported counts as a hallucination. Episode 8 asks what that checker would have done with a real discovery: Einstein's relativity paper, received by *Annalen der Physik* on 30 June 1905, checked against everything on the subject printed before that day. Then the library's date moves forward, and the same claims are checked again.
+
+The checker is unchanged: `AnswerVerifier(LlmClaimVerifier(get_llm))` from [`src/rag/trust.py`](./src/rag/trust.py), local `qwen3:8b`, with the app's own retrieval (hybrid search, cross-encoder re-ranking, top 4 of 20). Measurements come from [`scripts/ep8_benchmark.py`](./scripts/ep8_benchmark.py) on one CPU machine; a full run is 475 verdicts and took about 10 hours.
+
+Earlier episodes overlap here: [Episode 2](#episode-2--production-document-ingestion) dated and versioned every document, and here the date of each source decides whether the checker may see it. [Episode 4](#episode-4--trustworthy-answers) measured the checker against human labels (82% on SciFact); this episode reads every verdict again.
+
+### How it works
+
+- **A dated library.** [`scripts/ep8_library.py`](./scripts/ep8_library.py) fetches the relativity collection of English Wikisource (172 works) and Poincaré's essays on time and relativity, and records each work's date in [`config/ep8_library.jsonl`](./config/ep8_library.jsonl). Works dated 1905 carry the month from the issue or session (Poincaré's note of 5 June 1905 is in, Brace's July issue is out). Licence lines and notes added to later reprints are stripped. **Einstein's own paper is never in the library**, or it would support itself. Library sizes: 47 works for June 1905, 74 for 1908, 119 for 1911, 142 for 1914, 160 for 1921.
+- **Claims in words.** [`scripts/ep8_claims.py`](./scripts/ep8_claims.py) holds 22 of Einstein's ideas, each with the passage of the paper it comes from; 12 controls that were already in print before 1905 (Michelson–Morley's null result, Poincaré's principle of relativity, the FitzGerald–Lorentz contraction, local time); and 12 wrong claims, 6 invented and 6 that physics believed in 1905 (the ether at rest, a true time behind local time). Each claim has two phrasings; three have a third written as a formula.
+- **The same check as Episode 4.** Each claim is passed as a one-sentence answer citing the four retrieved sources. The headers on the sources carry each work's year, as the app's headers carry an effective date.
+- **Every verdict read.** [`scripts/ep8_read.py`](./scripts/ep8_read.py) shows each verdict with its four passages. I recorded whether the label follows from them (*fair*), the sources say otherwise (*judge error*), or the library holds a passage stating the claim that retrieval missed (*retrieval miss*). [`scripts/ep8_summary.py`](./scripts/ep8_summary.py) and [`scripts/ep8_charts.py`](./scripts/ep8_charts.py) turn the results into tables and charts.
+
+### Results
+
+**Supported / contradicted / not stated**, as the sources support it after reading (two phrasings per claim, formulas left out):
+
+| Claims | June 1905 | 1908 | 1911 | 1914 | 1921 |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| Einstein's (44) | **6** / 5 / 33 | 14 / 4 / 26 | 27 / 2 / 15 | 27 / 2 / 15 | 27 / 2 / 15 |
+| Already in print by 1905 (24) | 21 / 0 / 3 | 21 / 0 / 3 | 23 / 0 / 1 | 24 / 0 / 0 | 24 / 0 / 0 |
+| Invented errors (12) | 0 / 4 / 8 | 0 / 6 / 6 | 0 / 10 / 2 | 0 / 10 / 2 | 0 / 10 / 2 |
+| Errors of 1905 (12) | **10** / 0 / 2 | 8 / 3 / 1 | 9 / 2 / 1 | 8 / 3 / 1 | 7 / 3 / 2 |
+
+The checker's own labels for Einstein's claims were 10 / 12 / 22 in June 1905 and 24 / 6 / 14 in 1921. It agreed with my reading on **85%** of the 475 verdicts.
+
+- **In June 1905, none of Einstein's new ideas was supported.** The 6 phrasings supported after reading were all prior art: Poincaré 1904 (the principle of relativity; no means of telling rest from uniform motion; clocks set by crossed light signals), Cohn 1904 (a clock in a moving system "has changed its rate"), and the ether theory's own rule that light's speed does not depend on its source. The constant speed of light for every observer, the relativity of simultaneity, mutual contraction, the travelling clock and the composition of velocities were "not stated" or "contradicted".
+- **The 1905 consensus passed.** 10 of 12 phrasings of the era's errors were supported: the ether as the medium of light, the ether at rest, local time as an apparent time behind a true one, contraction caused by molecular forces, all mass electromagnetic. Most still pass in 1921, because old papers never leave the library.
+- **"Contradicted" came from real physics.** Lorentz 1895 derived the contraction from molecular forces; Cohn 1904 wrote that "the moving system is not deformed"; Fizeau 1860 measured light going faster in moving water.
+- **The verdicts change with the date.** Einstein's supported phrasings go from 6 in June 1905 to 14 in 1908 and 27 in 1911, as Kaufmann, Planck, Bumstead, Lewis and Tolman, Langevin and Laue write about the theory.
+- **The judge's most common mistake was a false "contradicted".** Of 70 judge errors, 24 called a claim contradicted when the sources simply did not mention it, and 13 when they actually supported it. The judge reads "my sources assume something else" as a contradiction, which is exactly what happens to a new idea.
+- **Formulas hurt.** Einstein's moving clock written as "loses ½ v²/c² of a second for every second" was "contradicted" in 1914 and 1921: the later sources give the exact factor, of which this is the approximation.
+- **A hypothesis discussed reads as a hypothesis supported.** From 1911, "light from a moving source arrives faster by the velocity of the source" was supported, because Tolman and Comstock discuss that emission theory before rejecting it.
+- **Retrieval missed 12 times** out of 475: the library held a passage stating the claim, but the top 4 did not. The most telling one: for "the luminiferous ether is superfluous", the June 1905 library already held Poincaré's *Science and Hypothesis* (1902): "some day, no doubt, the ether will be thrown aside as useless". The checker never saw it.
+
+Read the other way, the checker is a prior-art search: for each claim it returns who had said something close, and when.
+
+### Limits worth knowing
+
+- **One library.** English Wikisource, with the German and French frontier mostly through modern translations; *Annalen der Physik* is not in it. A different library would give different numbers; the pattern (prior art supported, new ideas not stated, consensus supported) is what to look for.
+- **The claims are my wording.** Each Einstein claim cites the passage it comes from; a different wording can change a verdict, which is why every claim has two.
+- **One reader.** The *fair*/*judge error* labels are mine, with a note for each, in the episode's results. They are not a second human label.
+- **The judge is an 8B model on CPU,** the same one as Episode 4.
+
+---
+
 ## Episode 9 — Running BeyondRAG on AWS
 
 > **In one sentence:** Here is how to run your RAG system on AWS: the whole architecture as CloudFormation, which you can check on your own machine, for free, with AWS's new emulator.
@@ -915,4 +966,5 @@ Some existing tests rewrite the tracked `workspace/dynamic_concepts.json`. Resto
 - [x] **Episode #05:** Multi-tenant isolation: signed identity, a required tenant scope, pool and silo layouts, offboarding, 22 cross-tenant attacks run before and after
 - [x] **Episode #06:** Observability and guardrails: OpenTelemetry traces and token metrics, outcome labels, a local Grafana stack, business guardrails, a token budget per tenant
 - [x] **Episode #07:** Reducing LLM costs: embedding and answer caches, a guarded semantic cache, model routing and a cascade, prompt and token optimization
+- [x] **Episode #08:** The hallucination checker vs. Einstein: grounding checks against a dated library, prior art, and why "grounded" is not "true"
 - [x] **Episode #09:** Running BeyondRAG on AWS: CloudFormation for every service over two Regions, checked locally on the AWS Emulator

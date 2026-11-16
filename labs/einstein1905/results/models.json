@@ -1,0 +1,136 @@
+{
+  "g1905": {
+    "repo": "mhla/gpt1905-d34",
+    "revision": "54ccc781fd576194e7737f4aa9f0d90aa08d1096",
+    "step": 19103,
+    "files": {
+      "README.md": {
+        "bytes": 2752,
+        "sha256": "17329d2b48ebf0d421ae0084c621ef4cf0f99f519003e0669ee1ba882ec318ad"
+      },
+      "meta_019103.json": {
+        "bytes": 1444,
+        "sha256": "0c8024efaac164e10c4b2b73c9df24c6d56edc474f7ee69dd4bede8ef49866aa"
+      },
+      "model_019103.pt": {
+        "bytes": 10579743323,
+        "sha256": "0bf9692acf78f220ceb5c1f24152890069afb9df3cae7213219bbdcff6189e34"
+      },
+      "nanochat/__init__.py": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "nanochat/checkpoint_manager.py": {
+        "bytes": 8371,
+        "sha256": "e755159e4f3d23353f2354ee45fe9fbcb50cf1b435e7cd06dc21533e0bf1eb85"
+      },
+      "nanochat/common.py": {
+        "bytes": 10403,
+        "sha256": "f449e6520c868808d4e39bbfb2d5a47a1c3d90d0d77ef6cbce0b4776a2ca1fdf"
+      },
+      "nanochat/engine.py": {
+        "bytes": 15898,
+        "sha256": "022bb621ed368526281ce952266f6275434b6435e7fdf4a0ee55fb2981d82050"
+      },
+      "nanochat/flash_attention.py": {
+        "bytes": 6554,
+        "sha256": "249371b93f74a5ec4b30f8bbc5f7ecc2807abb44d57084945edf4500129ba7c3"
+      },
+      "nanochat/fp8.py": {
+        "bytes": 12443,
+        "sha256": "56c4f8a7e80de4abe872f52f48dfc4f86fee987f6ff054138a6e86ca9f941f3c"
+      },
+      "nanochat/gpt.py": {
+        "bytes": 23553,
+        "sha256": "07e8c37380dfa141e045b8efad9bf540f5471dfcbc5739af94b8e85ca097456e"
+      },
+      "nanochat/loss_eval.py": {
+        "bytes": 3124,
+        "sha256": "00faad1e0ae8912022f79ee4bf583c4f9b4c058e4523c5674144648c49229fd6"
+      },
+      "nanochat/optim.py": {
+        "bytes": 25855,
+        "sha256": "2e309ad3f24b1f290656be31d34161076cc09f4f20ef305541bff97faf30b499"
+      },
+      "nanochat/tokenizer.py": {
+        "bytes": 18360,
+        "sha256": "aff263228b25484f6c0cfc654701feba73ac952f20b6d375d3bb2a2b3bea28a1"
+      },
+      "tokenizer/token_bytes.pt": {
+        "bytes": 132677,
+        "sha256": "cb29b37ce0a5e433e23411f25b1e44f0ca0b2892c3b502a7ef8fc31b836f8633"
+      },
+      "tokenizer/tokenizer.pkl": {
+        "bytes": 400932,
+        "sha256": "5e7d5a9088a7eb1743132eaebf8c7d448f88dc62ba0be2dec3d5e2489ede648b"
+      }
+    }
+  },
+  "g1900": {
+    "repo": "mhla/gpt1900-d34-22btok",
+    "revision": "d6330f9f0a17ce13da36fb951d7987bb03e6fbd0",
+    "step": 10507,
+    "files": {
+      "README.md": {
+        "bytes": 2925,
+        "sha256": "13994f72eabbc10454219ad2188875eb4a9e3221625bce268cd1a6c3bed3bede"
+      },
+      "meta_010507.json": {
+        "bytes": 1379,
+        "sha256": "7760e4f6c1caf5fdd002881ec8eba1f5bbcf480d6c24f01a9c1b4edbe067ee26"
+      },
+      "model_010507.pt": {
+        "bytes": 10579743323,
+        "sha256": "0aff5326add2d9ba0a898555cc03dc199565ef2fa26e60fe1d9548abf2e91902"
+      },
+      "nanochat/__init__.py": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "nanochat/checkpoint_manager.py": {
+        "bytes": 7756,
+        "sha256": "24e14c5ba5babb98fa5e872ca10e9e444b3d207f3cf2da93fd3bf757cabf8be5"
+      },
+      "nanochat/common.py": {
+        "bytes": 10403,
+        "sha256": "f449e6520c868808d4e39bbfb2d5a47a1c3d90d0d77ef6cbce0b4776a2ca1fdf"
+      },
+      "nanochat/engine.py": {
+        "bytes": 15898,
+        "sha256": "022bb621ed368526281ce952266f6275434b6435e7fdf4a0ee55fb2981d82050"
+      },
+      "nanochat/flash_attention.py": {
+        "bytes": 6554,
+        "sha256": "249371b93f74a5ec4b30f8bbc5f7ecc2807abb44d57084945edf4500129ba7c3"
+      },
+      "nanochat/fp8.py": {
+        "bytes": 12443,
+        "sha256": "56c4f8a7e80de4abe872f52f48dfc4f86fee987f6ff054138a6e86ca9f941f3c"
+      },
+      "nanochat/gpt.py": {
+        "bytes": 23198,
+        "sha256": "890cb550a74f6a92db1d389b1694355912fe0575ab7b8dc24ac3edcabfbb4d23"
+      },
+      "nanochat/loss_eval.py": {
+        "bytes": 3124,
+        "sha256": "00faad1e0ae8912022f79ee4bf583c4f9b4c058e4523c5674144648c49229fd6"
+      },
+      "nanochat/optim.py": {
+        "bytes": 25625,
+        "sha256": "b85fce126b886ad6bf0225d64f0825f51138e1c94f4795895f5c7ebe52a24417"
+      },
+      "nanochat/tokenizer.py": {
+        "bytes": 18360,
+        "sha256": "aff263228b25484f6c0cfc654701feba73ac952f20b6d375d3bb2a2b3bea28a1"
+      },
+      "tokenizer/token_bytes.pt": {
+        "bytes": 132677,
+        "sha256": "cb29b37ce0a5e433e23411f25b1e44f0ca0b2892c3b502a7ef8fc31b836f8633"
+      },
+      "tokenizer/tokenizer.pkl": {
+        "bytes": 400932,
+        "sha256": "5e7d5a9088a7eb1743132eaebf8c7d448f88dc62ba0be2dec3d5e2489ede648b"
+      }
+    }
+  }
+}
