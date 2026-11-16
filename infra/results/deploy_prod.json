@@ -1,0 +1,475 @@
+{
+ "env": "prod",
+ "region": "us-east-1",
+ "total_seconds": 10.4,
+ "stacks": [
+  {
+   "stack": "beyondrag-prod-network",
+   "kind": "CREATE",
+   "changes": [
+    {
+     "action": "Add",
+     "resource": "AppDefaultRouteA",
+     "type": "AWS::EC2::Route",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "AppDefaultRouteB",
+     "type": "AWS::EC2::Route",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "AppRouteTableA",
+     "type": "AWS::EC2::RouteTable",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "AppRouteTableB",
+     "type": "AWS::EC2::RouteTable",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "AppSecurityGroup",
+     "type": "AWS::EC2::SecurityGroup",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "AppSubnetA",
+     "type": "AWS::EC2::Subnet",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "AppSubnetARoutes",
+     "type": "AWS::EC2::SubnetRouteTableAssociation",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "AppSubnetB",
+     "type": "AWS::EC2::Subnet",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "AppSubnetBRoutes",
+     "type": "AWS::EC2::SubnetRouteTableAssociation",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "CacheSecurityGroup",
+     "type": "AWS::EC2::SecurityGroup",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "DataRouteTable",
+     "type": "AWS::EC2::RouteTable",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "DataSubnetA",
+     "type": "AWS::EC2::Subnet",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "DataSubnetARoutes",
+     "type": "AWS::EC2::SubnetRouteTableAssociation",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "DataSubnetB",
+     "type": "AWS::EC2::Subnet",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "DataSubnetBRoutes",
+     "type": "AWS::EC2::SubnetRouteTableAssociation",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "DatabaseSecurityGroup",
+     "type": "AWS::EC2::SecurityGroup",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "GatewayAttachment",
+     "type": "AWS::EC2::VPCGatewayAttachment",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "InternetGateway",
+     "type": "AWS::EC2::InternetGateway",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "LoadBalancerSecurityGroup",
+     "type": "AWS::EC2::SecurityGroup",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "NatAddressA",
+     "type": "AWS::EC2::EIP",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "NatAddressB",
+     "type": "AWS::EC2::EIP",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "NatGatewayA",
+     "type": "AWS::EC2::NatGateway",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "NatGatewayB",
+     "type": "AWS::EC2::NatGateway",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "PublicDefaultRoute",
+     "type": "AWS::EC2::Route",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "PublicRouteTable",
+     "type": "AWS::EC2::RouteTable",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "PublicSubnetA",
+     "type": "AWS::EC2::Subnet",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "PublicSubnetARoutes",
+     "type": "AWS::EC2::SubnetRouteTableAssociation",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "PublicSubnetB",
+     "type": "AWS::EC2::Subnet",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "PublicSubnetBRoutes",
+     "type": "AWS::EC2::SubnetRouteTableAssociation",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "S3Endpoint",
+     "type": "AWS::EC2::VPCEndpoint",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "SearchSecurityGroup",
+     "type": "AWS::EC2::SecurityGroup",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "Vpc",
+     "type": "AWS::EC2::VPC",
+     "replacement": null
+    }
+   ],
+   "status": "CREATE_COMPLETE",
+   "seconds": 2.1,
+   "resources": 32
+  },
+  {
+   "stack": "beyondrag-prod-data",
+   "kind": "CREATE",
+   "changes": [
+    {
+     "action": "Add",
+     "resource": "BackupPlan",
+     "type": "AWS::Backup::BackupPlan",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "BackupRole",
+     "type": "AWS::IAM::Role",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "BackupSelection",
+     "type": "AWS::Backup::BackupSelection",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "BackupVault",
+     "type": "AWS::Backup::BackupVault",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "Cache",
+     "type": "AWS::ElastiCache::ReplicationGroup",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "CacheSubnets",
+     "type": "AWS::ElastiCache::SubnetGroup",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "DataKey",
+     "type": "AWS::KMS::Key",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "DataKeyAlias",
+     "type": "AWS::KMS::Alias",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "Database",
+     "type": "AWS::RDS::DBInstance",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "DatabaseParameters",
+     "type": "AWS::RDS::DBParameterGroup",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "DatabaseSubnets",
+     "type": "AWS::RDS::DBSubnetGroup",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "SearchDomain",
+     "type": "AWS::OpenSearchService::Domain",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "UploadsBucket",
+     "type": "AWS::S3::Bucket",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "UploadsBucketPolicy",
+     "type": "AWS::S3::BucketPolicy",
+     "replacement": null
+    }
+   ],
+   "status": "CREATE_COMPLETE",
+   "seconds": 4.1,
+   "resources": 14
+  },
+  {
+   "stack": "beyondrag-prod-observability",
+   "kind": "CREATE",
+   "changes": [
+    {
+     "action": "Add",
+     "resource": "AlarmTopic",
+     "type": "AWS::SNS::Topic",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "AppLogGroup",
+     "type": "AWS::Logs::LogGroup",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "Grafana",
+     "type": "AWS::Grafana::Workspace",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "GrafanaRole",
+     "type": "AWS::IAM::Role",
+     "replacement": null
+    }
+   ],
+   "status": "CREATE_COMPLETE",
+   "seconds": 2.0,
+   "resources": 4
+  },
+  {
+   "stack": "beyondrag-prod-app",
+   "kind": "CREATE",
+   "changes": [
+    {
+     "action": "Add",
+     "resource": "AuthSecret",
+     "type": "AWS::SecretsManager::Secret",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "Cluster",
+     "type": "AWS::ECS::Cluster",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "CpuScaling",
+     "type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "DatabaseCpuAlarm",
+     "type": "AWS::CloudWatch::Alarm",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "ErasureKey",
+     "type": "AWS::SecretsManager::Secret",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "ExecutionRole",
+     "type": "AWS::IAM::Role",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "Http5xxAlarm",
+     "type": "AWS::CloudWatch::Alarm",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "HttpListener",
+     "type": "AWS::ElasticLoadBalancingV2::Listener",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "HttpsListener",
+     "type": "AWS::ElasticLoadBalancingV2::Listener",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "LoadBalancer",
+     "type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "Repository",
+     "type": "AWS::ECR::Repository",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "RequestScaling",
+     "type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "ScalableTarget",
+     "type": "AWS::ApplicationAutoScaling::ScalableTarget",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "SearchRedAlarm",
+     "type": "AWS::CloudWatch::Alarm",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "Service",
+     "type": "AWS::ECS::Service",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "SlowAnswersAlarm",
+     "type": "AWS::CloudWatch::Alarm",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "TargetGroup",
+     "type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "TaskDefinition",
+     "type": "AWS::ECS::TaskDefinition",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "TaskRole",
+     "type": "AWS::IAM::Role",
+     "replacement": null
+    },
+    {
+     "action": "Add",
+     "resource": "UnhealthyTasksAlarm",
+     "type": "AWS::CloudWatch::Alarm",
+     "replacement": null
+    }
+   ],
+   "status": "CREATE_COMPLETE",
+   "seconds": 2.1,
+   "resources": 19
+  }
+ ],
+ "emulator_workarounds": [
+  {
+   "output": "DatabaseSecretArn",
+   "why": "Database.MasterUserSecret.SecretArn came back empty",
+   "used": "the secret RDS reports for the instance"
+  },
+  {
+   "output": "CacheAddress",
+   "why": "the emulator's CloudFormation creates no ElastiCache resources",
+   "used": "a placeholder host name"
+  }
+ ]
+}

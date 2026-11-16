@@ -14,6 +14,7 @@ Most RAG tutorials stop at chunking a single PDF for a single user. A company-wi
 | [**#06**](#episode-6--observability-and-guardrails) | Observability and guardrails | OpenTelemetry traces and token metrics for every model call, one outcome label per answer, a local Grafana stack, business guardrails, a daily token budget per tenant |
 | [**#07**](#episode-7--reducing-llm-costs) | Reducing LLM costs | Embedding cache and batching, an answer cache scoped by tenant, roles and corpus version, a guarded semantic cache, model routing and a cascade, prompt and token optimization, measured against answer quality |
 | [**#08**](#episode-8--the-hallucination-checker-vs-einstein) | The hallucination checker vs. Einstein | The Episode 4 checker run on Einstein's 1905 relativity paper, against libraries of physics dated June 1905 to 1921; every verdict read |
+| [**#09**](#episode-9--running-beyondrag-on-aws) | Running BeyondRAG on AWS | CloudFormation for ECS, RDS, OpenSearch, ElastiCache, Managed Grafana and S3 over two Regions, checked locally on the new AWS Emulator |
 
 ---
 
@@ -754,6 +755,57 @@ Read the other way, the checker is a prior-art search: for each claim it returns
 
 ---
 
+## Episode 9 — Running BeyondRAG on AWS
+
+> **In one sentence:** Here is how to run your RAG system on AWS: the whole architecture as CloudFormation, which you can check on your own machine, for free, with AWS's new emulator.
+
+Moving BeyondRAG to AWS turns out to be straightforward: every piece that runs locally has a managed AWS service waiting for it, and four CloudFormation templates describe all of it. To try them without an AWS account, AWS released the [AWS Emulator](https://github.com/aws/aws-emulator) in November 2026: a local AWS endpoint you can deploy CloudFormation to. One command deploys the whole infrastructure into it and checks it:
+
+```bash
+docker compose -f infra/docker-compose.aws.yml up --build --exit-code-from deployer
+```
+
+The infrastructure is deployed **empty**, as most deployments start: everything is created, nothing runs yet. Filling it with the app (building the image, pushing it, rolling it out) is the job of CI/CD, a follow-up episode. Everything is in [`infra/`](./infra/README.md).
+
+### How it works
+
+| Runs locally | Runs on AWS |
+| :--- | :--- |
+| `beyondrag-app` | ECS on Fargate behind an Application Load Balancer, with auto scaling; images in ECR |
+| Postgres | RDS for PostgreSQL 16 |
+| Elasticsearch | Amazon OpenSearch Service 2 |
+| Redis | ElastiCache for Valkey 8 |
+| Grafana | Amazon Managed Grafana, reading CloudWatch |
+| `workspace/uploads` | S3 |
+
+Four stacks, each building on the one before:
+
+1. **Network**: a VPC across two Availability Zones. The load balancer is the only thing facing the internet; the app sits in private subnets; the data stores sit in subnets with no route out at all.
+2. **Data**: PostgreSQL, OpenSearch and Valkey, encrypted, with a standby in a second zone in production; the uploads bucket; daily backups copied to a second Region.
+3. **Observability**: logs, an alarm topic and Grafana.
+4. **App**: the container service, the load balancer, scaling on CPU and on requests per task, and alarms.
+
+The same templates deploy production in us-east-1 and a small recovery copy in us-west-2, with different parameters (`infra/params/`). The app stack has one switch, `ServiceState`: `Empty` until there is an image, `Live` once CI/CD delivers one.
+
+### Results
+
+On the emulator, from one command:
+
+- **The whole infrastructure in about 10 seconds**: 69 resources in us-east-1, 67 in the recovery Region.
+- **42 of 48 checks pass** in each Region. The checks read each resource back from its service: the data tier has no route out, every security group only accepts the tier in front of it, the database is encrypted and private, backups are copied to the second Region, the app gets its passwords from Secrets Manager.
+- **Going live** changes exactly two resources: the service and its scaling target.
+- **Scaling**: CPU at 90% against a 60% target took the service from 2 to 3 tasks.
+- **Recovery Region**: brought to production size in about 2 seconds.
+
+The emulator is new, and some services aren't fully covered yet; that is where the remaining checks stop. [`infra/README.md`](./infra/README.md) notes the details.
+
+### Limits worth knowing
+
+- **The emulator checks the infrastructure, not the app.** It doesn't run container images, so the app itself is tested on AWS in the CI/CD episode.
+- **A few app changes come first**: OpenSearch needs a search adapter (BeyondRAG uses Elasticsearch 8 features), the app builds its database URL from the settings the task receives, and uploads go to S3.
+
+---
+
 ## Repository Structure
 
 ```text
@@ -811,6 +863,7 @@ BeyondRAG/
 │       └── static/
 │           └── index.html    # 2-Section Web UI (Document Upload & KB List + Multi-Lingual Chat)
 ├── observability/            # Episode 6: Grafana dashboard and alert rules for the lgtm profile
+├── infra/                    # Episode 9: CloudFormation for AWS, and a compose file to check it on the AWS Emulator
 ├── scripts/                  # Eval gate, showcase measurements and fixture generators
 ├── tests/                    # Unit, acceptance and live-Elasticsearch tests
 ├── eval/                     # Golden dataset, thresholds and evaluation corpus
@@ -914,3 +967,4 @@ Some existing tests rewrite the tracked `workspace/dynamic_concepts.json`. Resto
 - [x] **Episode #06:** Observability and guardrails: OpenTelemetry traces and token metrics, outcome labels, a local Grafana stack, business guardrails, a token budget per tenant
 - [x] **Episode #07:** Reducing LLM costs: embedding and answer caches, a guarded semantic cache, model routing and a cascade, prompt and token optimization
 - [x] **Episode #08:** The hallucination checker vs. Einstein: grounding checks against a dated library, prior art, and why "grounded" is not "true"
+- [x] **Episode #09:** Running BeyondRAG on AWS: CloudFormation for every service over two Regions, checked locally on the AWS Emulator

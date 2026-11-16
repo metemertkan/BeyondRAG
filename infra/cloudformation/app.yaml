@@ -1,0 +1,401 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  BeyondRAG app: an ECR repository, an ECS cluster on Fargate, the task definition wired to
+  the data stores, an Application Load Balancer, the ECS service and its auto scaling, and
+  the alarms. Deployed Empty (no tasks) until CI/CD has pushed an image, then Live.
+
+Parameters:
+  EnvName:
+    Type: String
+    AllowedPattern: "[a-z][a-z0-9-]{1,15}"
+  ServiceState:
+    Type: String
+    AllowedValues: [Empty, Live]
+    Default: Empty
+    Description: Empty creates everything and runs no tasks. Live runs the Capacity profile.
+  ImageTag:
+    Type: String
+    Default: bootstrap
+    Description: Image tag in this stack's ECR repository; CI/CD sets it.
+  TaskCpu:
+    Type: String
+    AllowedValues: ["1024", "2048", "4096"]
+    Default: "2048"
+  TaskMemory:
+    Type: String
+    Default: "4096"
+  Capacity:
+    Type: String
+    AllowedValues: [Small, Production]
+    Default: Production
+    Description: >-
+      Small runs 1 to 3 tasks, Production 2 to 10. Both scale on 60% CPU or 50 requests per
+      task per minute. Named profiles with literal numbers rather than Number parameters: the
+      AWS Emulator's CloudFormation (1.0.385) passes Number parameters on as strings.
+  ModelEndpoint:
+    Type: String
+    Default: ""
+    Description: OpenAI-compatible or Ollama endpoint for the LLM and embeddings. Not provisioned here.
+  CertificateArn:
+    Type: String
+    Default: ""
+    Description: ACM certificate for HTTPS. Empty serves HTTP only.
+  DatabaseSecretArn:
+    Type: String
+    AllowedPattern: "arn:aws[a-z-]*:secretsmanager:.+"
+    Description: >-
+      The secret RDS manages for the database (the data stack's DatabaseSecretArn output).
+      Passed in by the pipeline rather than imported: see infra/README.md.
+  CacheAddress:
+    Type: String
+    MinLength: 1
+    Description: The cache's primary endpoint (the data stack's CacheAddress output).
+
+Conditions:
+  IsLive: !Equals [!Ref ServiceState, Live]
+  IsProduction: !Equals [!Ref Capacity, Production]
+  HasCertificate: !Not [!Equals [!Ref CertificateArn, ""]]
+
+Resources:
+  # --- Images -----------------------------------------------------------------------
+  Repository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "beyondrag-${EnvName}"
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration: {ScanOnPush: true}
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules": [{"rulePriority": 1, "description": "keep the last 20 images",
+            "selection": {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 20},
+            "action": {"type": "expire"}}]}
+
+  # --- Secrets the app generates for itself -----------------------------------------
+  AuthSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "beyondrag/${EnvName}/auth-secret"
+      Description: Signs BeyondRAG identity tokens (RAG_AUTH_SECRET)
+      KmsKeyId: !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-data-key"}
+      GenerateSecretString: {PasswordLength: 48, ExcludePunctuation: true}
+  ErasureKey:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "beyondrag/${EnvName}/erasure-key"
+      Description: Keys the GDPR erasure log (RAG_ERASURE_KEY)
+      KmsKeyId: !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-data-key"}
+      GenerateSecretString: {PasswordLength: 48, ExcludePunctuation: true}
+
+  # --- Roles --------------------------------------------------------------------------
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - {Effect: Allow, Principal: {Service: ecs-tasks.amazonaws.com}, Action: sts:AssumeRole}
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+      Policies:
+        - PolicyName: read-app-secrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref DatabaseSecretArn
+                  - !Ref AuthSecret
+                  - !Ref ErasureKey
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-data-key"}
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - {Effect: Allow, Principal: {Service: ecs-tasks.amazonaws.com}, Action: sts:AssumeRole}
+      Policies:
+        - PolicyName: app-data-access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Uploads
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject, s3:ListBucket]
+                Resource:
+                  - !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-uploads-arn"}
+                  - !Sub
+                    - "${Bucket}/*"
+                    - Bucket: !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-uploads-arn"}
+              - Sid: Search
+                Effect: Allow
+                Action: [es:ESHttpGet, es:ESHttpPost, es:ESHttpPut, es:ESHttpDelete, es:ESHttpHead]
+                Resource: !Sub
+                  - "${Domain}/*"
+                  - Domain: !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-search-arn"}
+              - Sid: DataKey
+                Effect: Allow
+                Action: [kms:Decrypt, kms:GenerateDataKey]
+                Resource: !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-data-key"}
+
+  # --- Compute ------------------------------------------------------------------------
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "beyondrag-${EnvName}"
+      ClusterSettings: [{Name: containerInsights, Value: enabled}]
+      CapacityProviders: [FARGATE, FARGATE_SPOT]
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "beyondrag-${EnvName}"
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: !Ref TaskCpu
+      Memory: !Ref TaskMemory
+      RuntimePlatform: {CpuArchitecture: X86_64, OperatingSystemFamily: LINUX}
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: app
+          Image: !Sub "${Repository.RepositoryUri}:${ImageTag}"
+          Essential: true
+          # 8090 is fixed by the image (EXPOSE 8090). A literal, not a Number parameter: the
+          # AWS Emulator's CloudFormation (1.0.385) passes Number parameters on as strings.
+          PortMappings: [{ContainerPort: 8090, Protocol: tcp}]
+          Environment:
+            - {Name: WEB_HOST, Value: 0.0.0.0}
+            - {Name: WEB_PORT, Value: "8090"}
+            - Name: ELASTICSEARCH_URL
+              Value: !Sub
+                - "https://${Endpoint}:443"
+                - Endpoint: !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-search-endpoint"}
+            - Name: REDIS_URL
+              Value: !Sub
+                - "rediss://${Address}:6379/0"
+                - Address: !Ref CacheAddress
+            - {Name: POSTGRES_HOST, Value: !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-db-address"}}
+            - {Name: POSTGRES_PORT, Value: !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-db-port"}}
+            - {Name: POSTGRES_DB, Value: langgraph_state}
+            - {Name: RAG_UPLOADS_BUCKET, Value: !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-uploads"}}
+            - {Name: OLLAMA_BASE_URL, Value: !Ref ModelEndpoint}
+            - {Name: RAG_AUTH_MODE, Value: signed}
+          Secrets:
+            - Name: POSTGRES_USER
+              ValueFrom: !Sub
+                - "${Secret}:username::"
+                - Secret: !Ref DatabaseSecretArn
+            - Name: POSTGRES_PASSWORD
+              ValueFrom: !Sub
+                - "${Secret}:password::"
+                - Secret: !Ref DatabaseSecretArn
+            - {Name: RAG_AUTH_SECRET, ValueFrom: !Ref AuthSecret}
+            - {Name: RAG_ERASURE_KEY, ValueFrom: !Ref ErasureKey}
+          HealthCheck:
+            Command: ["CMD-SHELL", "curl -fsS http://localhost:8090/api/health || exit 1"]
+            Interval: 15
+            Timeout: 5
+            Retries: 4
+            StartPeriod: 120
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-app-logs"}
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: app
+
+  # --- Load balancer ------------------------------------------------------------------
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "beyondrag-${EnvName}"
+      Type: application
+      Scheme: internet-facing
+      Subnets: !Split [",", !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-public-subnets"}]
+      SecurityGroups: [!ImportValue {"Fn::Sub": "beyondrag-${EnvName}-alb-sg"}]
+      LoadBalancerAttributes:
+        - {Key: idle_timeout.timeout_seconds, Value: "180"}   # answers with verification take minutes on CPU
+        - {Key: routing.http.drop_invalid_header_fields.enabled, Value: "true"}
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "beyondrag-${EnvName}"
+      TargetType: ip
+      Protocol: HTTP
+      Port: 8090
+      VpcId: !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-vpc"}
+      HealthCheckPath: /api/health
+      HealthCheckIntervalSeconds: 15
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        - {Key: deregistration_delay.timeout_seconds, Value: "30"}
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions: !If
+        - HasCertificate
+        - [{Type: redirect, RedirectConfig: {Protocol: HTTPS, Port: "443", StatusCode: HTTP_301}}]
+        - [{Type: forward, TargetGroupArn: !Ref TargetGroup}]
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasCertificate
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Protocol: HTTPS
+      Port: 443
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      Certificates: [{CertificateArn: !Ref CertificateArn}]
+      DefaultActions: [{Type: forward, TargetGroupArn: !Ref TargetGroup}]
+
+  # --- Service and scaling ------------------------------------------------------------
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: HttpListener
+    Properties:
+      ServiceName: app
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      LaunchType: FARGATE
+      DesiredCount: !If [IsLive, !If [IsProduction, 2, 1], 0]
+      HealthCheckGracePeriodSeconds: 180
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Split [",", !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-app-subnets"}]
+          SecurityGroups: [!ImportValue {"Fn::Sub": "beyondrag-${EnvName}-app-sg"}]
+          AssignPublicIp: DISABLED
+      LoadBalancers:
+        - {ContainerName: app, ContainerPort: 8090, TargetGroupArn: !Ref TargetGroup}
+      PropagateTags: SERVICE
+
+  ScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      ServiceNamespace: ecs
+      ScalableDimension: ecs:service:DesiredCount
+      ResourceId: !Sub "service/${Cluster}/${Service.Name}"
+      MinCapacity: !If [IsLive, !If [IsProduction, 2, 1], 0]
+      MaxCapacity: !If [IsLive, !If [IsProduction, 10, 3], 0]
+  CpuScaling:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "beyondrag-${EnvName}-cpu"
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification: {PredefinedMetricType: ECSServiceAverageCPUUtilization}
+        TargetValue: 60
+        ScaleOutCooldown: 60
+        ScaleInCooldown: 300
+  RequestScaling:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "beyondrag-${EnvName}-requests"
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ALBRequestCountPerTarget
+          ResourceLabel: !Sub "${LoadBalancer.LoadBalancerFullName}/${TargetGroup.TargetGroupFullName}"
+        TargetValue: 50
+        ScaleOutCooldown: 60
+        ScaleInCooldown: 300
+
+  # --- Alarms -------------------------------------------------------------------------
+  Http5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "beyondrag-${EnvName}-5xx"
+      AlarmDescription: The app returned more than 10 server errors in 5 minutes.
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_Target_5XX_Count
+      Dimensions: [{Name: LoadBalancer, Value: !GetAtt LoadBalancer.LoadBalancerFullName}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!ImportValue {"Fn::Sub": "beyondrag-${EnvName}-alarm-topic"}]
+  SlowAnswersAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "beyondrag-${EnvName}-p95-latency"
+      AlarmDescription: 95th percentile response time above 60 seconds for 15 minutes.
+      Namespace: AWS/ApplicationELB
+      MetricName: TargetResponseTime
+      Dimensions: [{Name: LoadBalancer, Value: !GetAtt LoadBalancer.LoadBalancerFullName}]
+      ExtendedStatistic: p95
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 60
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!ImportValue {"Fn::Sub": "beyondrag-${EnvName}-alarm-topic"}]
+  UnhealthyTasksAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "beyondrag-${EnvName}-unhealthy-tasks"
+      AlarmDescription: At least one app task failed its health check for 5 minutes.
+      Namespace: AWS/ApplicationELB
+      MetricName: UnHealthyHostCount
+      Dimensions:
+        - {Name: LoadBalancer, Value: !GetAtt LoadBalancer.LoadBalancerFullName}
+        - {Name: TargetGroup, Value: !GetAtt TargetGroup.TargetGroupFullName}
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 5
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!ImportValue {"Fn::Sub": "beyondrag-${EnvName}-alarm-topic"}]
+  DatabaseCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "beyondrag-${EnvName}-db-cpu"
+      Namespace: AWS/RDS
+      MetricName: CPUUtilization
+      Dimensions: [{Name: DBInstanceIdentifier, Value: !Sub "beyondrag-${EnvName}"}]
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions: [!ImportValue {"Fn::Sub": "beyondrag-${EnvName}-alarm-topic"}]
+  SearchRedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "beyondrag-${EnvName}-search-red"
+      AlarmDescription: At least one primary shard is not allocated.
+      Namespace: AWS/ES
+      MetricName: ClusterStatus.red
+      Dimensions:
+        - {Name: DomainName, Value: !Sub "beyondrag-${EnvName}"}
+        - {Name: ClientId, Value: !Ref "AWS::AccountId"}
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions: [!ImportValue {"Fn::Sub": "beyondrag-${EnvName}-alarm-topic"}]
+
+Outputs:
+  Url:
+    Value: !If [HasCertificate, !Sub "https://${LoadBalancer.DNSName}", !Sub "http://${LoadBalancer.DNSName}"]
+  RepositoryUri:
+    Value: !GetAtt Repository.RepositoryUri
+  ClusterName:
+    Value: !Ref Cluster
+  ServiceName:
+    Value: !GetAtt Service.Name

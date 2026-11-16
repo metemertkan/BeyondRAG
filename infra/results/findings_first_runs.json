@@ -1,0 +1,125 @@
+{
+ "note": "What the emulator caught while the templates were being written (2026-11-16, AWS Emulator 1.0.385). cfn-lint passed every template each time.",
+ "findings": [
+  {
+   "stack": "data",
+   "resource": "Database",
+   "message": "Cannot find version 16.6 for postgres",
+   "cause": "Pinned minor version not in the emulator's catalogue (16.3 and 16.4 only)",
+   "fix": "EngineVersion \"16\": RDS picks and upgrades the minor version (created 16.4)",
+   "kind": "template choice"
+  },
+  {
+   "stack": "data",
+   "resource": "SearchDomain",
+   "message": "Value 'r7g.large.search' at 'clusterConfig.instanceType' failed to satisfy constraint",
+   "cause": "The emulator's OpenSearch model has no r7g instance types",
+   "fix": "r6g.large.search",
+   "kind": "emulator gap"
+  },
+  {
+   "stack": "data",
+   "resource": "SearchDomain",
+   "message": "Invalid request provided: expected number, got string",
+   "cause": "The emulator's CloudFormation passes a value from a Number parameter or a mapping to OpenSearch as a string; literals and !If of literals work",
+   "fix": "VolumeSize: !If [LargeSearch, 100, 20]",
+   "kind": "emulator gap"
+  },
+  {
+   "stack": "data",
+   "resource": "Database",
+   "message": "ROLLBACK_FAILED: Cannot delete protected DB Instance, please disable deletion protection and try again",
+   "cause": "A failed first create rolls back by deleting what it made; deletion protection blocks it and the stack is stuck. Real AWS behaves the same way",
+   "fix": "None needed in the template; the deploy script reports it, and the recovery is to disable protection on the orphaned instance and delete the stack",
+   "kind": "real AWS behaviour"
+  },
+  {
+   "stack": "data",
+   "resource": "Cache, CacheSubnets",
+   "message": "CREATE_COMPLETE, but ElastiCache has no such replication group or subnet group",
+   "cause": "The emulator's CloudFormation reports ElastiCache resources (replication group and serverless cache alike) as created without creating them; ElastiCache called directly creates them",
+   "fix": "None in the template. infra.py inventory and verify report it; the app stack gets a placeholder cache address",
+   "kind": "emulator gap"
+  },
+  {
+   "stack": "data",
+   "resource": "Database",
+   "message": "Output DatabaseSecretArn (!GetAtt Database.MasterUserSecret.SecretArn) is empty",
+   "cause": "The emulator's CloudFormation returns no value for this attribute although RDS created the secret",
+   "fix": "The app stack takes the secret ARN as a parameter; the deployer reads it from the data stack's output, or from RDS where the output is empty",
+   "kind": "emulator gap"
+  },
+  {
+   "stack": "data",
+   "resource": "Database",
+   "message": "The RDS-managed secret is encrypted with aws/secretsmanager, not the data key",
+   "cause": "The emulator's CloudFormation ignores MasterUserSecret.KmsKeyId; RDS called directly honours MasterUserSecretKmsKeyId",
+   "fix": "None in the template; verify reports it as blocked by the emulator",
+   "kind": "emulator gap"
+  },
+  {
+   "stack": "app",
+   "resource": "TaskDefinition",
+   "message": "expected number, got string",
+   "cause": "Same as the OpenSearch volume: a Number parameter (AppPort) passed on as a string",
+   "fix": "Port 8090 as a literal; it is fixed by the image anyway",
+   "kind": "emulator gap"
+  },
+  {
+   "stack": "app",
+   "resource": "(stack)",
+   "message": "No export named beyondrag-prod-db-secret found",
+   "cause": "An export whose value is empty cannot be imported, even from the branch of an !If that is not taken",
+   "fix": "Pass the two values as parameters (see the DatabaseSecretArn finding)",
+   "kind": "emulator gap"
+  },
+  {
+   "stack": "app",
+   "resource": "(stack)",
+   "message": "Stack is in ROLLBACK_COMPLETE state and can not be updated",
+   "cause": "A stack whose first create failed can only be deleted. Real AWS behaves the same way",
+   "fix": "infra.py deletes such a stack before creating it again",
+   "kind": "real AWS behaviour"
+  },
+  {
+   "stack": "data",
+   "resource": "BackupPlan",
+   "message": "operation ListBackupPlans is scaffolded but not implemented in this emulator",
+   "cause": "API not implemented (GetBackupPlan is)",
+   "fix": "verify reads the plan by the ID the stack reports",
+   "kind": "emulator gap"
+  },
+  {
+   "stack": "app",
+   "resource": "TaskDefinition",
+   "message": "NotImplemented: this emulator does not change the properties of an existing AWS::ECS::TaskDefinition in place",
+   "cause": "On AWS a changed task definition becomes a new revision; the emulator does not do that update",
+   "fix": "Going live changes only the service and its scaling; new images (and so new revisions) are the CI/CD episode's job",
+   "kind": "emulator gap"
+  },
+  {
+   "stack": "app",
+   "resource": "Service, ScalableTarget",
+   "message": "expected number, got string",
+   "cause": "DesiredCount and MinCapacity/MaxCapacity from Number parameters (MinTasks, MaxTasks)",
+   "fix": "Capacity profiles: Small (1 to 3 tasks) and Production (2 to 10) with literal numbers chosen by conditions",
+   "kind": "emulator gap"
+  },
+  {
+   "stack": "network",
+   "resource": "DatabaseSecurityGroup",
+   "message": "Drift detection reports IN_SYNC after 5432 was opened to 0.0.0.0/0 by hand",
+   "cause": "The emulator's drift detection did not report the added ingress rule",
+   "fix": "None; reported as a drill result",
+   "kind": "emulator gap"
+  },
+  {
+   "stack": "data",
+   "resource": "Database",
+   "message": "Drift detection reports /EngineVersion NOT_EQUAL",
+   "cause": "The template asks for major version 16; RDS runs 16.4. Asking for a major version keeps the template valid as minor versions are retired, at the cost of this comparison",
+   "fix": "None; noted",
+   "kind": "observed"
+  }
+ ]
+}

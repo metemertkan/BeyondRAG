@@ -1,0 +1,108 @@
+{
+ "go_live": {
+  "status": "UPDATE_COMPLETE",
+  "seconds": 2.0,
+  "changes": [
+   {
+    "action": "Modify",
+    "resource": "ScalableTarget",
+    "type": "AWS::ApplicationAutoScaling::ScalableTarget",
+    "replacement": "False"
+   },
+   {
+    "action": "Modify",
+    "resource": "Service",
+    "type": "AWS::ECS::Service",
+    "replacement": "False"
+   }
+  ],
+  "desired": 2,
+  "bounds": [
+   2,
+   10
+  ]
+ },
+ "scaling": {
+  "target_tracking_alarms": [
+   "55b9:CPUUtilization",
+   "6bbb:CPUUtilization",
+   "8285:RequestCountPerTarget",
+   "d8e2:RequestCountPerTarget"
+  ],
+  "simulated_metric": true,
+  "cpu_90": [
+   2,
+   3,
+   9.0
+  ],
+  "cpu_15": [
+   3,
+   3,
+   20.1
+  ],
+  "activities": [
+   [
+    "InProgress",
+    "Setting desired count to 3.",
+    "monitor alarm TargetTracking-service/beyondrag-prod/app-AlarmHigh-3f058768-2d34-36d9-6bbb-15e68343a881 in state ALARM triggered policy beyondrag-prod-cpu"
+   ]
+  ],
+  "running_tasks": 0
+ },
+ "no_op": {
+  "status": "NO_CHANGES",
+  "reason": "The submitted information didn't contain changes. Submit different information to create a change set.",
+  "changes": []
+ },
+ "drift": {
+  "database opened to 0.0.0.0/0": {
+   "stack_status": "IN_SYNC",
+   "drifted": []
+  },
+  "uploads versioning suspended": {
+   "stack_status": "DRIFTED",
+   "drifted": [
+    {
+     "resource": "Database",
+     "status": "MODIFIED",
+     "differences": [
+      [
+       "/EngineVersion",
+       "NOT_EQUAL"
+      ]
+     ]
+    },
+    {
+     "resource": "UploadsBucket",
+     "status": "MODIFIED",
+     "differences": [
+      [
+       "/VersioningConfiguration/Status",
+       "NOT_EQUAL"
+      ]
+     ]
+    }
+   ]
+  }
+ },
+ "failover": {
+  "status": "UPDATE_COMPLETE",
+  "seconds": 2.2,
+  "changes": [
+   {
+    "action": "Modify",
+    "resource": "ScalableTarget",
+    "type": "AWS::ApplicationAutoScaling::ScalableTarget",
+    "replacement": "False"
+   },
+   {
+    "action": "Modify",
+    "resource": "Service",
+    "type": "AWS::ECS::Service",
+    "replacement": "False"
+   }
+  ],
+  "desired_in_dr": 2,
+  "dr_backup_vault": "arn:aws:backup:us-west-2:000000000000:backup-vault:beyondrag-prod"
+ }
+}

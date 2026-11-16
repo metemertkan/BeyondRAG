@@ -1,0 +1,67 @@
+# BeyondRAG's AWS infrastructure on the AWS Emulator, no AWS account needed.
+#
+#   docker compose -f infra/docker-compose.aws.yml up --build --exit-code-from deployer
+#
+# Two emulators stand in for two Regions: us-east-1 (primary, port 9297) and us-west-2
+# (disaster recovery, port 9298). The deployer lints the templates, deploys them empty, reads
+# every resource back, runs the scaling and recovery drills and writes infra/results/.
+#
+# The emulator's TLS certificate is issued for 127.0.0.1 only, so the two emulators and the
+# deployer share one network namespace and reach each other on 127.0.0.1.
+#
+# To look around with the AWS CLI on your machine while the emulators run:
+#   eval "$(infra/scripts/aws-env.sh primary)"     # or: dr
+#   aws cloudformation describe-stacks
+
+services:
+  aws-emulator:
+    build: ./emulator
+    image: beyondrag/aws-emulator:local
+    container_name: beyondrag_aws_primary
+    command: ["-p", "9297", "--telemetry", "off"]
+    ports: ["127.0.0.1:9297:9297", "127.0.0.1:9298:9298"]
+    mem_limit: 2g
+    memswap_limit: 2g
+    volumes: ["emulator-primary:/home/emulator/.aws/emulator"]
+    healthcheck:
+      test: ["CMD", "curl", "-skf", "https://127.0.0.1:9297/__admin/health"]
+      interval: 2s
+      retries: 30
+
+  aws-emulator-dr:
+    build: ./emulator
+    image: beyondrag/aws-emulator:local
+    container_name: beyondrag_aws_dr
+    network_mode: service:aws-emulator
+    command: ["-p", "9298", "--telemetry", "off"]
+    mem_limit: 2g
+    memswap_limit: 2g
+    volumes: ["emulator-dr:/home/emulator/.aws/emulator"]
+    depends_on:
+      aws-emulator: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-skf", "https://127.0.0.1:9298/__admin/health"]
+      interval: 2s
+      retries: 30
+
+  deployer:
+    build: ./scripts
+    image: beyondrag/aws-deployer:local
+    container_name: beyondrag_aws_deployer
+    network_mode: service:aws-emulator
+    depends_on:
+      aws-emulator: {condition: service_healthy}
+      aws-emulator-dr: {condition: service_healthy}
+    volumes:
+      - ./:/infra
+      - emulator-primary:/emulator/primary:ro
+      - emulator-dr:/emulator/dr:ro
+    # Your own user, so infra/results/ stays yours. Set HOST_UID/HOST_GID if yours is not 1000.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    environment:
+      HOME: /tmp
+    command: ["all"]
+
+volumes:
+  emulator-primary:
+  emulator-dr:

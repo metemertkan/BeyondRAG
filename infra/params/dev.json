@@ -1,0 +1,29 @@
+{
+  "description": "Development: one NAT gateway, single-AZ data stores, no deletion protection.",
+  "region": "us-east-1",
+  "stacks": {
+    "network": {
+      "EnvName": "dev",
+      "NatGateways": "One"
+    },
+    "data": {
+      "EnvName": "dev",
+      "MultiAz": "false",
+      "DeletionProtection": "false",
+      "BackupRetentionDays": "3",
+      "DbInstanceClass": "db.t4g.small",
+      "SearchInstanceType": "t3.medium.search",
+      "CacheNodeType": "cache.t4g.micro",
+      "SearchSize": "Small"
+    },
+    "observability": {
+      "EnvName": "dev",
+      "LogRetentionDays": "7"
+    },
+    "app": {
+      "EnvName": "dev",
+      "ServiceState": "Empty",
+      "Capacity": "Small"
+    }
+  }
+}
