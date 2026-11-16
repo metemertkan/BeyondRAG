@@ -739,7 +739,7 @@ The checker's own labels for Einstein's claims were 10 / 12 / 22 in June 1905 an
 - **The judge's most common mistake was a false "contradicted".** Of 70 judge errors, 24 called a claim contradicted when the sources simply did not mention it, and 13 when they actually supported it. The judge reads "my sources assume something else" as a contradiction, which is exactly what happens to a new idea.
 - **Formulas hurt.** Einstein's moving clock written as "loses ½ v²/c² of a second for every second" was "contradicted" in 1914 and 1921: the later sources give the exact factor, of which this is the approximation.
 - **A hypothesis discussed reads as a hypothesis supported.** From 1911, "light from a moving source arrives faster by the velocity of the source" was supported, because Tolman and Comstock discuss that emission theory before rejecting it.
-- **Retrieval missed 9 times** out of 475: the library held a passage stating the claim, but the top 4 did not.
+- **Retrieval missed 12 times** out of 475: the library held a passage stating the claim, but the top 4 did not. The most telling one: for "the luminiferous ether is superfluous", the June 1905 library already held Poincaré's *Science and Hypothesis* (1902): "some day, no doubt, the ether will be thrown aside as useless". The checker never saw it.
 
 Read the other way, the checker is a prior-art search: for each claim it returns who had said something close, and when.
 
