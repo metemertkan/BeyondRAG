@@ -706,6 +706,8 @@ The token count doesn't change; only the time shows it. Ollama kept both prompts
 
 ## Episode 8 — The Hallucination Checker vs. Einstein
 
+> **In one sentence:** I gave an AI fact-checker only what was known in 1905. It rejected Einstein and approved the ether, because a fact-checker doesn't check what's true. It checks what's already written.
+
 Episode 4 built a checker that labels every sentence supported, contradicted or not stated by the sources. Anything not supported counts as a hallucination. Episode 8 asks what that checker would have done with a real discovery: Einstein's relativity paper, received by *Annalen der Physik* on 30 June 1905, checked against everything on the subject printed before that day. Then the library's date moves forward, and the same claims are checked again.
 
 The checker is unchanged: `AnswerVerifier(LlmClaimVerifier(get_llm))` from [`src/rag/trust.py`](./src/rag/trust.py), local `qwen3:8b`, with the app's own retrieval (hybrid search, cross-encoder re-ranking, top 4 of 20). Measurements come from [`scripts/ep8_benchmark.py`](./scripts/ep8_benchmark.py) on one CPU machine; a full run is 475 verdicts and took about 10 hours.
