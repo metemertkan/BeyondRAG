@@ -1,0 +1,27 @@
+{
+  "description": "Production in us-east-1: NAT per AZ, Multi-AZ data stores, 7 days of backups copied daily to the recovery Region.",
+  "region": "us-east-1",
+  "stacks": {
+    "network": {
+      "EnvName": "prod",
+      "NatGateways": "PerAz"
+    },
+    "data": {
+      "EnvName": "prod",
+      "MultiAz": "true",
+      "DeletionProtection": "true",
+      "BackupRetentionDays": "7",
+      "DrBackupVaultArn": "arn:aws:backup:us-west-2:{account}:backup-vault:beyondrag-prod",
+      "SearchSize": "Large"
+    },
+    "observability": {
+      "EnvName": "prod",
+      "LogRetentionDays": "30"
+    },
+    "app": {
+      "EnvName": "prod",
+      "ServiceState": "Empty",
+      "Capacity": "Production"
+    }
+  }
+}

@@ -1,0 +1,297 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  BeyondRAG data stores: RDS for PostgreSQL (LangGraph state), Amazon OpenSearch Service
+  (search index), ElastiCache for Valkey (caches), an S3 bucket for uploads, one KMS key
+  for all of them, and an AWS Backup plan that can copy to a recovery Region.
+
+Parameters:
+  EnvName:
+    Type: String
+    AllowedPattern: "[a-z][a-z0-9-]{1,15}"
+  MultiAz:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+    Description: Standby database, two search nodes in two zones, a cache replica with failover.
+  DbInstanceClass:
+    Type: String
+    Default: db.t4g.medium
+  DbEngineVersion:
+    Type: String
+    Default: "16"
+    Description: Major version; RDS picks the current minor version and upgrades it.
+  DbStorageGb:
+    Type: Number
+    Default: 50
+    MinValue: 20
+  SearchInstanceType:
+    Type: String
+    Default: r6g.large.search
+  SearchSize:
+    Type: String
+    AllowedValues: [Small, Large]
+    Default: Large
+    Description: EBS volume per search node, Small = 20 GB, Large = 100 GB.
+  CacheNodeType:
+    Type: String
+    Default: cache.t4g.small
+  BackupRetentionDays:
+    Type: Number
+    Default: 7
+    MinValue: 1
+    MaxValue: 35
+  DeletionProtection:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+  DrBackupVaultArn:
+    Type: String
+    Default: ""
+    Description: Backup vault in the recovery Region to copy daily backups to. Empty for none.
+
+Conditions:
+  IsMultiAz: !Equals [!Ref MultiAz, "true"]
+  CopyToDr: !Not [!Equals [!Ref DrBackupVaultArn, ""]]
+  LargeSearch: !Equals [!Ref SearchSize, Large]
+  Protect: !Or [!Condition IsMultiAz, !Equals [!Ref DeletionProtection, "true"]]
+
+Resources:
+  DataKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "BeyondRAG ${EnvName} data at rest"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AccountAdministers
+            Effect: Allow
+            Principal: {AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"}
+            Action: "kms:*"
+            Resource: "*"
+  DataKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/beyondrag-${EnvName}-data"
+      TargetKeyId: !Ref DataKey
+
+  # --- PostgreSQL -------------------------------------------------------------------
+  DatabaseSubnets:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: BeyondRAG data subnets
+      SubnetIds: !Split [",", !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-data-subnets"}]
+  DatabaseParameters:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: BeyondRAG PostgreSQL, TLS required
+      Family: postgres16
+      Parameters:
+        rds.force_ssl: "1"
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub "beyondrag-${EnvName}"
+      Engine: postgres
+      EngineVersion: !Ref DbEngineVersion
+      DBInstanceClass: !Ref DbInstanceClass
+      DBName: langgraph_state
+      MasterUsername: beyondrag
+      ManageMasterUserPassword: true       # the password lives in Secrets Manager, rotated by RDS
+      MasterUserSecret: {KmsKeyId: !Ref DataKey}
+      AllocatedStorage: !Ref DbStorageGb
+      StorageType: gp3
+      StorageEncrypted: true
+      KmsKeyId: !Ref DataKey
+      MultiAZ: !If [IsMultiAz, true, false]
+      BackupRetentionPeriod: !Ref BackupRetentionDays
+      PreferredBackupWindow: "02:00-03:00"
+      CopyTagsToSnapshot: true
+      DeletionProtection: !If [Protect, true, false]
+      PubliclyAccessible: false
+      AutoMinorVersionUpgrade: true
+      DBSubnetGroupName: !Ref DatabaseSubnets
+      DBParameterGroupName: !Ref DatabaseParameters
+      VPCSecurityGroups: [!ImportValue {"Fn::Sub": "beyondrag-${EnvName}-db-sg"}]
+      Tags: [{Key: Backup, Value: daily}]
+
+  # --- OpenSearch (the search index) ------------------------------------------------
+  SearchDomain:
+    Type: AWS::OpenSearchService::Domain
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      DomainName: !Sub "beyondrag-${EnvName}"
+      EngineVersion: OpenSearch_2.17
+      ClusterConfig:
+        InstanceType: !Ref SearchInstanceType
+        InstanceCount: !If [IsMultiAz, 2, 1]
+        ZoneAwarenessEnabled: !If [IsMultiAz, true, false]
+        ZoneAwarenessConfig: !If [IsMultiAz, {AvailabilityZoneCount: 2}, !Ref "AWS::NoValue"]
+      EBSOptions:
+        EBSEnabled: true
+        VolumeType: gp3
+        # Literal sizes on purpose: the AWS Emulator's CloudFormation (1.0.385) passes a value
+        # from a Number parameter or a mapping to OpenSearch as a string, which OpenSearch
+        # rejects. Real CloudFormation converts it; literals work in both.
+        VolumeSize: !If [LargeSearch, 100, 20]
+      VPCOptions:
+        SubnetIds: !If
+          - IsMultiAz
+          - !Split [",", !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-data-subnets"}]
+          - [!Select [0, !Split [",", !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-data-subnets"}]]]
+        SecurityGroupIds: [!ImportValue {"Fn::Sub": "beyondrag-${EnvName}-search-sg"}]
+      EncryptionAtRestOptions: {Enabled: true, KmsKeyId: !Ref DataKey}
+      NodeToNodeEncryptionOptions: {Enabled: true}
+      DomainEndpointOptions:
+        EnforceHTTPS: true
+        TLSSecurityPolicy: Policy-Min-TLS-1-2-PFS-2023-10
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"}
+            Action: "es:ESHttp*"
+            Resource: !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/beyondrag-${EnvName}/*"
+      Tags: [{Key: Backup, Value: daily}]
+
+  # --- Valkey (caches) --------------------------------------------------------------
+  CacheSubnets:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: BeyondRAG data subnets
+      SubnetIds: !Split [",", !ImportValue {"Fn::Sub": "beyondrag-${EnvName}-data-subnets"}]
+  Cache:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      ReplicationGroupId: !Sub "beyondrag-${EnvName}"
+      ReplicationGroupDescription: BeyondRAG embedding, answer and LLM caches
+      Engine: valkey
+      EngineVersion: "8.0"
+      CacheNodeType: !Ref CacheNodeType
+      NumCacheClusters: !If [IsMultiAz, 2, 1]
+      AutomaticFailoverEnabled: !If [IsMultiAz, true, false]
+      MultiAZEnabled: !If [IsMultiAz, true, false]
+      CacheSubnetGroupName: !Ref CacheSubnets
+      SecurityGroupIds: [!ImportValue {"Fn::Sub": "beyondrag-${EnvName}-cache-sg"}]
+      Port: 6379
+      AtRestEncryptionEnabled: true
+      KmsKeyId: !Ref DataKey
+      TransitEncryptionEnabled: true
+      SnapshotRetentionLimit: 1
+
+  # --- Uploads ----------------------------------------------------------------------
+  UploadsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "beyondrag-${EnvName}-uploads-${AWS::AccountId}-${AWS::Region}"
+      VersioningConfiguration: {Status: Enabled}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: "aws:kms", KMSMasterKeyID: !Ref DataKey}
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ObjectOwnership: BucketOwnerEnforced}]
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-versions
+            Status: Enabled
+            NoncurrentVersionExpiration: {NoncurrentDays: 30}
+      Tags: [{Key: Backup, Value: daily}]
+  UploadsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref UploadsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TlsOnly
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource: [!GetAtt UploadsBucket.Arn, !Sub "${UploadsBucket.Arn}/*"]
+            Condition: {Bool: {"aws:SecureTransport": "false"}}
+
+  # --- Backups ----------------------------------------------------------------------
+  BackupVault:
+    Type: AWS::Backup::BackupVault
+    Properties:
+      BackupVaultName: !Sub "beyondrag-${EnvName}"
+      EncryptionKeyArn: !GetAtt DataKey.Arn
+  BackupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: backup.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores"
+  BackupPlan:
+    Type: AWS::Backup::BackupPlan
+    Properties:
+      BackupPlan:
+        BackupPlanName: !Sub "beyondrag-${EnvName}-daily"
+        BackupPlanRule:
+          - RuleName: daily
+            TargetBackupVault: !Ref BackupVault
+            ScheduleExpression: cron(0 3 * * ? *)
+            StartWindowMinutes: 60
+            Lifecycle: {DeleteAfterDays: 35}
+            CopyActions: !If
+              - CopyToDr
+              - [{DestinationBackupVaultArn: !Ref DrBackupVaultArn, Lifecycle: {DeleteAfterDays: 35}}]
+              - !Ref "AWS::NoValue"
+  BackupSelection:
+    Type: AWS::Backup::BackupSelection
+    Properties:
+      BackupPlanId: !Ref BackupPlan
+      BackupSelection:
+        SelectionName: tagged-daily
+        IamRoleArn: !GetAtt BackupRole.Arn
+        ListOfTags:
+          - {ConditionType: STRINGEQUALS, ConditionKey: Backup, ConditionValue: daily}
+
+Outputs:
+  DataKeyArn:
+    Value: !GetAtt DataKey.Arn
+    Export: {Name: !Sub "beyondrag-${EnvName}-data-key"}
+  DatabaseAddress:
+    Value: !GetAtt Database.Endpoint.Address
+    Export: {Name: !Sub "beyondrag-${EnvName}-db-address"}
+  DatabasePort:
+    Value: !GetAtt Database.Endpoint.Port
+    Export: {Name: !Sub "beyondrag-${EnvName}-db-port"}
+  DatabaseSecretArn:
+    Value: !GetAtt Database.MasterUserSecret.SecretArn
+    Export: {Name: !Sub "beyondrag-${EnvName}-db-secret"}
+  SearchEndpoint:
+    Value: !GetAtt SearchDomain.DomainEndpoint
+    Export: {Name: !Sub "beyondrag-${EnvName}-search-endpoint"}
+  SearchDomainArn:
+    Value: !GetAtt SearchDomain.Arn
+    Export: {Name: !Sub "beyondrag-${EnvName}-search-arn"}
+  CacheAddress:
+    Value: !GetAtt Cache.PrimaryEndPoint.Address
+    Export: {Name: !Sub "beyondrag-${EnvName}-cache-address"}
+  UploadsBucket:
+    Value: !Ref UploadsBucket
+    Export: {Name: !Sub "beyondrag-${EnvName}-uploads"}
+  UploadsBucketArn:
+    Value: !GetAtt UploadsBucket.Arn
+    Export: {Name: !Sub "beyondrag-${EnvName}-uploads-arn"}
+  BackupVaultArn:
+    Value: !GetAtt BackupVault.BackupVaultArn
+    Export: {Name: !Sub "beyondrag-${EnvName}-backup-vault"}

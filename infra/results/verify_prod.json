@@ -1,0 +1,377 @@
+{
+ "env": "prod",
+ "region": "us-east-1",
+ "passed": 42,
+ "total": 48,
+ "failed": [],
+ "blocked_by_emulator": 6,
+ "checks": [
+  {
+   "area": "network",
+   "check": "subnets span two Availability Zones",
+   "ok": true,
+   "observed": 2
+  },
+  {
+   "area": "network",
+   "check": "data subnets have no route to the internet",
+   "ok": true,
+   "observed": []
+  },
+  {
+   "area": "network",
+   "check": "app subnets reach the internet only through NAT",
+   "ok": true,
+   "observed": [
+    "nat"
+   ]
+  },
+  {
+   "area": "network",
+   "check": "NAT gateways (one per AZ in prod)",
+   "ok": true,
+   "observed": 2
+  },
+  {
+   "area": "network",
+   "check": "only the load balancer is open to the internet",
+   "ok": true,
+   "observed": [
+    "LoadBalancerSecurityGroup"
+   ]
+  },
+  {
+   "area": "network",
+   "check": "app accepts only the load balancer",
+   "ok": true,
+   "observed": [
+    "8090 from sg-000000000000000b4"
+   ]
+  },
+  {
+   "area": "network",
+   "check": "database accepts only the app",
+   "ok": true,
+   "observed": [
+    "5432 from sg-000000000000000b8"
+   ]
+  },
+  {
+   "area": "network",
+   "check": "search accepts only the app",
+   "ok": true,
+   "observed": [
+    "443 from sg-000000000000000b8"
+   ]
+  },
+  {
+   "area": "network",
+   "check": "cache accepts only the app",
+   "ok": true,
+   "observed": [
+    "6379 from sg-000000000000000b8"
+   ]
+  },
+  {
+   "area": "postgres",
+   "check": "engine",
+   "ok": true,
+   "observed": [
+    "postgres",
+    "16"
+   ]
+  },
+  {
+   "area": "postgres",
+   "check": "Multi-AZ standby",
+   "ok": true,
+   "observed": true
+  },
+  {
+   "area": "postgres",
+   "check": "storage encrypted with the data key",
+   "ok": true,
+   "observed": [
+    true,
+    true
+   ]
+  },
+  {
+   "area": "postgres",
+   "check": "its secret encrypted with the data key",
+   "ok": false,
+   "observed": false,
+   "blocked_by": "the emulator's CloudFormation ignores MasterUserSecret.KmsKeyId (RDS called directly honours it)"
+  },
+  {
+   "area": "postgres",
+   "check": "not publicly accessible",
+   "ok": true,
+   "observed": false
+  },
+  {
+   "area": "postgres",
+   "check": "automated backups kept",
+   "ok": true,
+   "observed": 7
+  },
+  {
+   "area": "postgres",
+   "check": "deletion protection",
+   "ok": true,
+   "observed": true
+  },
+  {
+   "area": "postgres",
+   "check": "password managed in Secrets Manager",
+   "ok": true,
+   "observed": true
+  },
+  {
+   "area": "postgres",
+   "check": "in the data subnets",
+   "ok": true,
+   "observed": [
+    "subnet-0000000000000009d",
+    "subnet-0000000000000009f"
+   ]
+  },
+  {
+   "area": "opensearch",
+   "check": "engine",
+   "ok": true,
+   "observed": "OpenSearch_2.17"
+  },
+  {
+   "area": "opensearch",
+   "check": "zone awareness",
+   "ok": true,
+   "observed": true
+  },
+  {
+   "area": "opensearch",
+   "check": "data nodes",
+   "ok": true,
+   "observed": 2
+  },
+  {
+   "area": "opensearch",
+   "check": "encrypted at rest and between nodes",
+   "ok": true,
+   "observed": [
+    true,
+    true
+   ]
+  },
+  {
+   "area": "opensearch",
+   "check": "HTTPS only",
+   "ok": true,
+   "observed": true
+  },
+  {
+   "area": "opensearch",
+   "check": "inside the VPC, not public",
+   "ok": true,
+   "observed": true
+  },
+  {
+   "area": "elasticache",
+   "check": "engine",
+   "ok": false,
+   "observed": "ReplicationGroupNotFoundFault: An error occurred (ReplicationGroupNotFoundFault) when calling the DescribeReplicationGroups operation: ReplicationGroup beyondrag-prod not found.",
+   "blocked_by": "the emulator's CloudFormation (1.0.385) reports ElastiCache resources as created without creating them"
+  },
+  {
+   "area": "elasticache",
+   "check": "automatic failover",
+   "ok": false,
+   "observed": "ReplicationGroupNotFoundFault: An error occurred (ReplicationGroupNotFoundFault) when calling the DescribeReplicationGroups operation: ReplicationGroup beyondrag-prod not found.",
+   "blocked_by": "the emulator's CloudFormation (1.0.385) reports ElastiCache resources as created without creating them"
+  },
+  {
+   "area": "elasticache",
+   "check": "Multi-AZ",
+   "ok": false,
+   "observed": "ReplicationGroupNotFoundFault: An error occurred (ReplicationGroupNotFoundFault) when calling the DescribeReplicationGroups operation: ReplicationGroup beyondrag-prod not found.",
+   "blocked_by": "the emulator's CloudFormation (1.0.385) reports ElastiCache resources as created without creating them"
+  },
+  {
+   "area": "elasticache",
+   "check": "nodes",
+   "ok": false,
+   "observed": "ReplicationGroupNotFoundFault: An error occurred (ReplicationGroupNotFoundFault) when calling the DescribeReplicationGroups operation: ReplicationGroup beyondrag-prod not found.",
+   "blocked_by": "the emulator's CloudFormation (1.0.385) reports ElastiCache resources as created without creating them"
+  },
+  {
+   "area": "elasticache",
+   "check": "encrypted at rest and in transit",
+   "ok": false,
+   "observed": "ReplicationGroupNotFoundFault: An error occurred (ReplicationGroupNotFoundFault) when calling the DescribeReplicationGroups operation: ReplicationGroup beyondrag-prod not found.",
+   "blocked_by": "the emulator's CloudFormation (1.0.385) reports ElastiCache resources as created without creating them"
+  },
+  {
+   "area": "s3",
+   "check": "versioning",
+   "ok": true,
+   "observed": "Enabled"
+  },
+  {
+   "area": "s3",
+   "check": "all public access blocked",
+   "ok": true,
+   "observed": true
+  },
+  {
+   "area": "s3",
+   "check": "encrypted with KMS",
+   "ok": true,
+   "observed": "aws:kms"
+  },
+  {
+   "area": "s3",
+   "check": "TLS required by policy",
+   "ok": true,
+   "observed": true
+  },
+  {
+   "area": "backup",
+   "check": "daily plan, kept 35 days",
+   "ok": true,
+   "observed": [
+    [
+     "cron(0 3 * * ? *)",
+     35
+    ]
+   ]
+  },
+  {
+   "area": "backup",
+   "check": "copied to the recovery Region",
+   "ok": true,
+   "observed": [
+    "us-west-2"
+   ]
+  },
+  {
+   "area": "ecs",
+   "check": "Container Insights on",
+   "ok": true,
+   "observed": [
+    "enabled"
+   ]
+  },
+  {
+   "area": "ecs",
+   "check": "tasks in the private app subnets, no public IP",
+   "ok": true,
+   "observed": [
+    [
+     "subnet-00000000000000099",
+     "subnet-0000000000000009b"
+    ],
+    "DISABLED"
+   ]
+  },
+  {
+   "area": "ecs",
+   "check": "deployment circuit breaker rolls back",
+   "ok": true,
+   "observed": {
+    "enable": true,
+    "rollback": true
+   }
+  },
+  {
+   "area": "ecs",
+   "check": "desired tasks (Empty = 0)",
+   "ok": true,
+   "observed": 0
+  },
+  {
+   "area": "ecs",
+   "check": "secrets come from Secrets Manager, not plain environment",
+   "ok": true,
+   "observed": [
+    "POSTGRES_PASSWORD",
+    "POSTGRES_USER",
+    "RAG_AUTH_SECRET",
+    "RAG_ERASURE_KEY"
+   ]
+  },
+  {
+   "area": "ecs",
+   "check": "no secret-looking names in plain environment",
+   "ok": true,
+   "observed": []
+  },
+  {
+   "area": "ecs",
+   "check": "app wired to the data stores",
+   "ok": true,
+   "observed": [
+    "ELASTICSEARCH_URL",
+    "POSTGRES_HOST",
+    "RAG_UPLOADS_BUCKET",
+    "REDIS_URL"
+   ]
+  },
+  {
+   "area": "alb",
+   "check": "internet-facing in the public subnets",
+   "ok": true,
+   "observed": [
+    "internet-facing",
+    [
+     "subnet-00000000000000095",
+     "subnet-00000000000000097"
+    ]
+   ]
+  },
+  {
+   "area": "alb",
+   "check": "health check on /api/health",
+   "ok": true,
+   "observed": [
+    "/api/health",
+    "ip"
+   ]
+  },
+  {
+   "area": "scaling",
+   "check": "bounds",
+   "ok": true,
+   "observed": [
+    0,
+    0
+   ]
+  },
+  {
+   "area": "scaling",
+   "check": "target tracking on CPU and on requests per task",
+   "ok": true,
+   "observed": [
+    "ALBRequestCountPerTarget",
+    "ECSServiceAverageCPUUtilization"
+   ]
+  },
+  {
+   "area": "alarms",
+   "check": "app and data alarms notify the alarm topic",
+   "ok": true,
+   "observed": [
+    "beyondrag-prod-5xx",
+    "beyondrag-prod-db-cpu",
+    "beyondrag-prod-p95-latency",
+    "beyondrag-prod-search-red",
+    "beyondrag-prod-unhealthy-tasks"
+   ]
+  },
+  {
+   "area": "grafana",
+   "check": "workspace reads CloudWatch",
+   "ok": true,
+   "observed": "ACTIVE"
+  }
+ ]
+}

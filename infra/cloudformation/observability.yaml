@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  BeyondRAG observability: the app's log group, an alarm topic, and an Amazon Managed
+  Grafana workspace that reads CloudWatch (the local stack uses grafana/otel-lgtm).
+
+Parameters:
+  EnvName:
+    Type: String
+    AllowedPattern: "[a-z][a-z0-9-]{1,15}"
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [7, 14, 30, 90, 180, 365]
+  GrafanaAuthentication:
+    Type: String
+    AllowedValues: [AWS_SSO, SAML]
+    Default: AWS_SSO
+    Description: How people sign in to Grafana (IAM Identity Center or a SAML provider).
+
+Resources:
+  AppLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/beyondrag/${EnvName}/app"
+      RetentionInDays: !Ref LogRetentionDays
+
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "beyondrag-${EnvName}-alarms"
+      KmsMasterKeyId: alias/aws/sns
+
+  GrafanaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: grafana.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: {"aws:SourceAccount": !Ref "AWS::AccountId"}
+      Policies:
+        - PolicyName: read-cloudwatch
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Metrics
+                Effect: Allow
+                Action:
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:DescribeAlarmsForMetric
+                  - cloudwatch:DescribeAlarmHistory
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:ListMetrics
+                  - cloudwatch:GetInsightRuleReport
+                Resource: "*"
+              - Sid: Logs
+                Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                  - logs:GetLogGroupFields
+                  - logs:StartQuery
+                  - logs:StopQuery
+                  - logs:GetQueryResults
+                  - logs:GetLogEvents
+                Resource: "*"
+              - Sid: Discovery
+                Effect: Allow
+                Action: [ec2:DescribeTags, ec2:DescribeInstances, ec2:DescribeRegions, tag:GetResources]
+                Resource: "*"
+              - Sid: Notify
+                Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref AlarmTopic
+
+  Grafana:
+    Type: AWS::Grafana::Workspace
+    Properties:
+      Name: !Sub "beyondrag-${EnvName}"
+      Description: BeyondRAG dashboards on CloudWatch
+      AccountAccessType: CURRENT_ACCOUNT
+      AuthenticationProviders: [!Ref GrafanaAuthentication]
+      PermissionType: CUSTOMER_MANAGED
+      RoleArn: !GetAtt GrafanaRole.Arn
+      DataSources: [CLOUDWATCH]
+      NotificationDestinations: [SNS]
+
+Outputs:
+  AppLogGroup:
+    Value: !Ref AppLogGroup
+    Export: {Name: !Sub "beyondrag-${EnvName}-app-logs"}
+  AlarmTopicArn:
+    Value: !Ref AlarmTopic
+    Export: {Name: !Sub "beyondrag-${EnvName}-alarm-topic"}
+  GrafanaUrl:
+    Value: !Sub "https://${Grafana.Endpoint}"
+    Export: {Name: !Sub "beyondrag-${EnvName}-grafana-url"}

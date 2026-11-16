@@ -13,6 +13,7 @@ Most RAG tutorials stop at chunking a single PDF for a single user. A company-wi
 | [**#05**](#episode-5--multi-tenant-isolation) | Multi-tenant isolation | Signed identity, a required tenant scope on every read and write, pool and silo index layouts, tenant offboarding, 22 cross-tenant attacks run before and after |
 | [**#06**](#episode-6--observability-and-guardrails) | Observability and guardrails | OpenTelemetry traces and token metrics for every model call, one outcome label per answer, a local Grafana stack, business guardrails, a daily token budget per tenant |
 | [**#07**](#episode-7--reducing-llm-costs) | Reducing LLM costs | Embedding cache and batching, an answer cache scoped by tenant, roles and corpus version, a guarded semantic cache, model routing and a cascade, prompt and token optimization, measured against answer quality |
+| [**#09**](#episode-9--beyondrag-on-aws-infrastructure-as-code) | BeyondRAG on AWS | CloudFormation for ECS, RDS, OpenSearch, ElastiCache, Managed Grafana and S3 over two Regions, deployed empty on the AWS Emulator, verified by reading every resource back |
 
 ---
 
@@ -703,6 +704,52 @@ The token count doesn't change; only the time shows it. Ollama kept both prompts
 
 ---
 
+## Episode 9 — BeyondRAG on AWS, Infrastructure as Code
+
+> **In one sentence:** I generated BeyondRAG's whole AWS infrastructure with CloudFormation and deployed it to a local AWS emulator for free. Every stack said CREATE_COMPLETE; reading each resource back found what wasn't there.
+
+Every deployment starts the same way: write the infrastructure, deploy it empty, then let CI/CD fill it. Episode 9 does the first two steps for BeyondRAG, on the [AWS Emulator](https://github.com/aws/aws-emulator) (released November 2026) instead of a paid account. One command runs it:
+
+```bash
+docker compose -f infra/docker-compose.aws.yml up --build --exit-code-from deployer
+```
+
+Everything is in [`infra/`](./infra/README.md): four CloudFormation stacks (network, data, observability, app), parameters for production in us-east-1 and a pilot-light recovery Region in us-west-2, and [`infra/scripts/infra.py`](./infra/scripts/infra.py), which lints, deploys, verifies and runs the drills. Filling the services with the app, on real AWS, is the CI/CD follow-up.
+
+### How it works
+
+| Local | AWS |
+| :--- | :--- |
+| `beyondrag-app` | ECS on Fargate, Application Load Balancer, Application Auto Scaling (CPU 60%, 50 requests per task a minute), ECR |
+| Postgres | RDS for PostgreSQL 16, Multi-AZ, password managed in Secrets Manager |
+| Elasticsearch | Amazon OpenSearch Service, zone-aware |
+| Redis | ElastiCache for Valkey, replica with automatic failover |
+| Grafana | Amazon Managed Grafana on CloudWatch |
+| `workspace/uploads` | S3, versioned, AWS Backup copied daily to us-west-2 |
+
+- **Empty, then live.** `ServiceState=Empty` creates everything and runs no tasks, because there is no image yet. `Live` runs the capacity profile; that switch is a change set of exactly two resources.
+- **Verified by reading back, not by the stack status.** `verify` runs 48 checks against what each service reports (the data tier has no route out, each security group accepts only the tier in front of it, the database is Multi-AZ, encrypted and private, the backups are copied to the other Region). `inventory` asks the owning service about every resource CloudFormation reports as created.
+
+### Results
+
+On AWS Emulator 1.0.385, one CPU machine:
+
+- **The whole infrastructure, empty: 69 resources in 10.4 s** in us-east-1, 67 in us-west-2. cfn-lint: 0 findings.
+- **Verify: 42 of 48 checks pass** in each Region, 0 fail, 6 are blocked by emulator gaps.
+- **Inventory: 69 resources reported CREATE_COMPLETE, 67 exist.** The emulator's CloudFormation reports the ElastiCache replication group and its subnet group as created without creating them; ElastiCache called directly creates them. Only reading back found it.
+- **Scaling:** CPU at 90% against the 60% target took the service from 2 to 3 tasks in 9 s; at 15% it held, inside the 300 s scale-in cooldown. The CPU value is handed to the alarm by the drill: no task runs in the emulator.
+- **Updates:** a redeploy with no change makes no change set; going live changes 2 resources; the recovery Region's app tier reaches production size in 2.2 s.
+- **Drift:** suspended versioning on the uploads bucket was detected; a database port opened to the internet by hand was not.
+- **15 findings while writing the templates, none caught by cfn-lint:** 11 emulator gaps (worked around in ways that are also valid on AWS, listed in [`infra/README.md`](./infra/README.md)), a pinned PostgreSQL minor version the catalogue did not have, two real AWS behaviours (a failed first create of a deletion-protected database leaves the stack in `ROLLBACK_FAILED`; a stack in `ROLLBACK_COMPLETE` can only be deleted), and drift reported on the database's engine version because the template asks for major version 16 and RDS runs 16.4.
+
+### Limits worth knowing
+
+- **The emulator verifies the AWS side, not the app.** It runs no container images and IAM policies are not evaluated, so nothing here proves BeyondRAG works on AWS. That is the CI/CD episode.
+- **OpenSearch is not a drop-in for Elasticsearch 8.** BeyondRAG uses the Elasticsearch 8 client, `int8_hnsw` and RRF; it needs a search adapter first. The app also needs to build `POSTGRES_URI` from the parts the task gets, and to write uploads to S3.
+- **Fidelity varies by service.** The emulator is checked against us-west-2; one emulator is one Region, so the recovery Region is a second container.
+
+---
+
 ## Repository Structure
 
 ```text
@@ -760,6 +807,7 @@ BeyondRAG/
 │       └── static/
 │           └── index.html    # 2-Section Web UI (Document Upload & KB List + Multi-Lingual Chat)
 ├── observability/            # Episode 6: Grafana dashboard and alert rules for the lgtm profile
+├── infra/                    # Episode 9: CloudFormation for AWS, verified on the AWS Emulator
 ├── scripts/                  # Eval gate, showcase measurements and fixture generators
 ├── tests/                    # Unit, acceptance and live-Elasticsearch tests
 ├── eval/                     # Golden dataset, thresholds and evaluation corpus
@@ -862,3 +910,4 @@ Some existing tests rewrite the tracked `workspace/dynamic_concepts.json`. Resto
 - [x] **Episode #05:** Multi-tenant isolation: signed identity, a required tenant scope, pool and silo layouts, offboarding, 22 cross-tenant attacks run before and after
 - [x] **Episode #06:** Observability and guardrails: OpenTelemetry traces and token metrics, outcome labels, a local Grafana stack, business guardrails, a token budget per tenant
 - [x] **Episode #07:** Reducing LLM costs: embedding and answer caches, a guarded semantic cache, model routing and a cascade, prompt and token optimization
+- [x] **Episode #09:** BeyondRAG on AWS: CloudFormation for every service over two Regions, deployed empty on the AWS Emulator and verified by reading every resource back

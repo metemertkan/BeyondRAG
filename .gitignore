@@ -23,3 +23,4 @@ workspace/.fastembed/
 .vscode/
 .idea/
 .DS_Store
+infra/.emulator/

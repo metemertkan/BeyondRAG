@@ -1,0 +1,255 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  BeyondRAG network: a VPC across two Availability Zones with three tiers of subnets
+  (public for the load balancer, private for the app, isolated for the data stores) and
+  security groups that chain load balancer -> app -> data stores.
+
+Parameters:
+  EnvName:
+    Type: String
+    AllowedPattern: "[a-z][a-z0-9-]{1,15}"
+    Description: Short environment name, used in resource names and exports.
+  VpcCidr:
+    Type: String
+    Default: 10.40.0.0/16
+    AllowedPattern: '(\d{1,3}\.){3}\d{1,3}/16'
+  NatGateways:
+    Type: String
+    AllowedValues: [One, PerAz]
+    Default: One
+    Description: One NAT gateway (cheaper, one AZ can cut off egress) or one per AZ.
+  AppPort:
+    Type: Number
+    Default: 8090
+
+Conditions:
+  NatPerAz: !Equals [!Ref NatGateways, PerAz]
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}"}]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}"}]
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  # Six /20 subnets: public, app and data in each of two Availability Zones.
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 6, 12]]
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-public-a"}]
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 6, 12]]
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-public-b"}]
+  AppSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Select [2, !Cidr [!Ref VpcCidr, 6, 12]]
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-app-a"}]
+  AppSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Select [3, !Cidr [!Ref VpcCidr, 6, 12]]
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-app-b"}]
+  DataSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Select [4, !Cidr [!Ref VpcCidr, 6, 12]]
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-data-a"}]
+  DataSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Select [5, !Cidr [!Ref VpcCidr, 6, 12]]
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-data-b"}]
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-public"}]
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnetARoutes:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref PublicSubnetA, RouteTableId: !Ref PublicRouteTable}
+  PublicSubnetBRoutes:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref PublicSubnetB, RouteTableId: !Ref PublicRouteTable}
+
+  # Egress for the app tier (pulling images, calling the model endpoint) goes through NAT.
+  NatAddressA:
+    Type: AWS::EC2::EIP
+    DependsOn: GatewayAttachment
+    Properties: {Domain: vpc}
+  NatGatewayA:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatAddressA.AllocationId
+      SubnetId: !Ref PublicSubnetA
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-a"}]
+  NatAddressB:
+    Type: AWS::EC2::EIP
+    Condition: NatPerAz
+    DependsOn: GatewayAttachment
+    Properties: {Domain: vpc}
+  NatGatewayB:
+    Type: AWS::EC2::NatGateway
+    Condition: NatPerAz
+    Properties:
+      AllocationId: !GetAtt NatAddressB.AllocationId
+      SubnetId: !Ref PublicSubnetB
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-b"}]
+
+  AppRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-app-a"}]
+  AppRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-app-b"}]
+  AppDefaultRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref AppRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+  AppDefaultRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref AppRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !If [NatPerAz, !Ref NatGatewayB, !Ref NatGatewayA]
+  AppSubnetARoutes:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref AppSubnetA, RouteTableId: !Ref AppRouteTableA}
+  AppSubnetBRoutes:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref AppSubnetB, RouteTableId: !Ref AppRouteTableB}
+
+  # The data tier has no route to the internet at all.
+  DataRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-data"}]
+  DataSubnetARoutes:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref DataSubnetA, RouteTableId: !Ref DataRouteTable}
+  DataSubnetBRoutes:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref DataSubnetB, RouteTableId: !Ref DataRouteTable}
+
+  # S3 traffic (uploads, backups) stays inside AWS instead of going through NAT.
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcEndpointType: Gateway
+      RouteTableIds: [!Ref AppRouteTableA, !Ref AppRouteTableB, !Ref DataRouteTable]
+
+  # Security groups: each tier accepts traffic only from the tier in front of it.
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: BeyondRAG load balancer, HTTP and HTTPS from anywhere
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0, Description: HTTP}
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: HTTPS}
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-alb"}]
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: BeyondRAG app tasks, only from the load balancer
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: !Ref AppPort, ToPort: !Ref AppPort, SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup, Description: From the load balancer}
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-app"}]
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: BeyondRAG PostgreSQL, only from the app
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 5432, ToPort: 5432, SourceSecurityGroupId: !Ref AppSecurityGroup, Description: From the app}
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-postgres"}]
+  SearchSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: BeyondRAG OpenSearch, only from the app
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, SourceSecurityGroupId: !Ref AppSecurityGroup, Description: From the app}
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-search"}]
+  CacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: BeyondRAG ElastiCache, only from the app
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 6379, ToPort: 6379, SourceSecurityGroupId: !Ref AppSecurityGroup, Description: From the app}
+      Tags: [{Key: Name, Value: !Sub "beyondrag-${EnvName}-cache"}]
+
+Outputs:
+  VpcId:
+    Value: !Ref Vpc
+    Export: {Name: !Sub "beyondrag-${EnvName}-vpc"}
+  PublicSubnets:
+    Value: !Join [",", [!Ref PublicSubnetA, !Ref PublicSubnetB]]
+    Export: {Name: !Sub "beyondrag-${EnvName}-public-subnets"}
+  AppSubnets:
+    Value: !Join [",", [!Ref AppSubnetA, !Ref AppSubnetB]]
+    Export: {Name: !Sub "beyondrag-${EnvName}-app-subnets"}
+  DataSubnets:
+    Value: !Join [",", [!Ref DataSubnetA, !Ref DataSubnetB]]
+    Export: {Name: !Sub "beyondrag-${EnvName}-data-subnets"}
+  LoadBalancerSecurityGroup:
+    Value: !Ref LoadBalancerSecurityGroup
+    Export: {Name: !Sub "beyondrag-${EnvName}-alb-sg"}
+  AppSecurityGroup:
+    Value: !Ref AppSecurityGroup
+    Export: {Name: !Sub "beyondrag-${EnvName}-app-sg"}
+  DatabaseSecurityGroup:
+    Value: !Ref DatabaseSecurityGroup
+    Export: {Name: !Sub "beyondrag-${EnvName}-db-sg"}
+  SearchSecurityGroup:
+    Value: !Ref SearchSecurityGroup
+    Export: {Name: !Sub "beyondrag-${EnvName}-search-sg"}
+  CacheSecurityGroup:
+    Value: !Ref CacheSecurityGroup
+    Export: {Name: !Sub "beyondrag-${EnvName}-cache-sg"}

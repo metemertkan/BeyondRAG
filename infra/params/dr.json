@@ -1,0 +1,26 @@
+{
+  "description": "Recovery Region us-west-2, pilot light: the whole stack deployed small and empty, ready to restore backups into and scale up.",
+  "region": "us-west-2",
+  "stacks": {
+    "network": {
+      "EnvName": "prod",
+      "NatGateways": "One"
+    },
+    "data": {
+      "EnvName": "prod",
+      "MultiAz": "false",
+      "DeletionProtection": "true",
+      "BackupRetentionDays": "7",
+      "SearchSize": "Small"
+    },
+    "observability": {
+      "EnvName": "prod",
+      "LogRetentionDays": "30"
+    },
+    "app": {
+      "EnvName": "prod",
+      "ServiceState": "Empty",
+      "Capacity": "Production"
+    }
+  }
+}

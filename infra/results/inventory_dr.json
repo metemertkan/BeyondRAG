@@ -1,0 +1,678 @@
+{
+ "env": "dr",
+ "region": "us-west-2",
+ "summary": {
+  "reported_complete": 67,
+  "exist": 65,
+  "missing": 2,
+  "cannot_check": 0
+ },
+ "by_type": {
+  "AWS::EC2::Route": {
+   "exists": 3,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::EC2::RouteTable": {
+   "exists": 4,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::EC2::SecurityGroup": {
+   "exists": 5,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::EC2::Subnet": {
+   "exists": 6,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::EC2::SubnetRouteTableAssociation": {
+   "exists": 6,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::EC2::VPCGatewayAttachment": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::EC2::InternetGateway": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::EC2::EIP": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::EC2::NatGateway": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::EC2::VPCEndpoint": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::EC2::VPC": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::Backup::BackupPlan": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::IAM::Role": {
+   "exists": 4,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::Backup::BackupSelection": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::Backup::BackupVault": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::ElastiCache::ReplicationGroup": {
+   "exists": 0,
+   "missing": 1,
+   "cannot check": 0
+  },
+  "AWS::ElastiCache::SubnetGroup": {
+   "exists": 0,
+   "missing": 1,
+   "cannot check": 0
+  },
+  "AWS::KMS::Key": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::KMS::Alias": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::RDS::DBInstance": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::RDS::DBParameterGroup": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::RDS::DBSubnetGroup": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::OpenSearchService::Domain": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::S3::Bucket": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::S3::BucketPolicy": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::SNS::Topic": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::Logs::LogGroup": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::Grafana::Workspace": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::SecretsManager::Secret": {
+   "exists": 2,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::ECS::Cluster": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::ApplicationAutoScaling::ScalingPolicy": {
+   "exists": 2,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::CloudWatch::Alarm": {
+   "exists": 5,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::ElasticLoadBalancingV2::Listener": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::ElasticLoadBalancingV2::LoadBalancer": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::ECR::Repository": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::ApplicationAutoScaling::ScalableTarget": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::ECS::Service": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::ElasticLoadBalancingV2::TargetGroup": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  },
+  "AWS::ECS::TaskDefinition": {
+   "exists": 1,
+   "missing": 0,
+   "cannot check": 0
+  }
+ },
+ "resources": [
+  {
+   "stack": "network",
+   "resource": "AppDefaultRouteA",
+   "type": "AWS::EC2::Route",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "AppDefaultRouteB",
+   "type": "AWS::EC2::Route",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "AppRouteTableA",
+   "type": "AWS::EC2::RouteTable",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "AppRouteTableB",
+   "type": "AWS::EC2::RouteTable",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "AppSecurityGroup",
+   "type": "AWS::EC2::SecurityGroup",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "AppSubnetA",
+   "type": "AWS::EC2::Subnet",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "AppSubnetARoutes",
+   "type": "AWS::EC2::SubnetRouteTableAssociation",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "AppSubnetB",
+   "type": "AWS::EC2::Subnet",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "AppSubnetBRoutes",
+   "type": "AWS::EC2::SubnetRouteTableAssociation",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "CacheSecurityGroup",
+   "type": "AWS::EC2::SecurityGroup",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "DataRouteTable",
+   "type": "AWS::EC2::RouteTable",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "DataSubnetA",
+   "type": "AWS::EC2::Subnet",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "DataSubnetARoutes",
+   "type": "AWS::EC2::SubnetRouteTableAssociation",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "DataSubnetB",
+   "type": "AWS::EC2::Subnet",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "DataSubnetBRoutes",
+   "type": "AWS::EC2::SubnetRouteTableAssociation",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "DatabaseSecurityGroup",
+   "type": "AWS::EC2::SecurityGroup",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "GatewayAttachment",
+   "type": "AWS::EC2::VPCGatewayAttachment",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "InternetGateway",
+   "type": "AWS::EC2::InternetGateway",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "LoadBalancerSecurityGroup",
+   "type": "AWS::EC2::SecurityGroup",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "NatAddressA",
+   "type": "AWS::EC2::EIP",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "NatGatewayA",
+   "type": "AWS::EC2::NatGateway",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "PublicDefaultRoute",
+   "type": "AWS::EC2::Route",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "PublicRouteTable",
+   "type": "AWS::EC2::RouteTable",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "PublicSubnetA",
+   "type": "AWS::EC2::Subnet",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "PublicSubnetARoutes",
+   "type": "AWS::EC2::SubnetRouteTableAssociation",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "PublicSubnetB",
+   "type": "AWS::EC2::Subnet",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "PublicSubnetBRoutes",
+   "type": "AWS::EC2::SubnetRouteTableAssociation",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "S3Endpoint",
+   "type": "AWS::EC2::VPCEndpoint",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "SearchSecurityGroup",
+   "type": "AWS::EC2::SecurityGroup",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "network",
+   "resource": "Vpc",
+   "type": "AWS::EC2::VPC",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "data",
+   "resource": "BackupPlan",
+   "type": "AWS::Backup::BackupPlan",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "data",
+   "resource": "BackupRole",
+   "type": "AWS::IAM::Role",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "data",
+   "resource": "BackupSelection",
+   "type": "AWS::Backup::BackupSelection",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "data",
+   "resource": "BackupVault",
+   "type": "AWS::Backup::BackupVault",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "data",
+   "resource": "Cache",
+   "type": "AWS::ElastiCache::ReplicationGroup",
+   "status": "CREATE_COMPLETE",
+   "exists": false
+  },
+  {
+   "stack": "data",
+   "resource": "CacheSubnets",
+   "type": "AWS::ElastiCache::SubnetGroup",
+   "status": "CREATE_COMPLETE",
+   "exists": false
+  },
+  {
+   "stack": "data",
+   "resource": "DataKey",
+   "type": "AWS::KMS::Key",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "data",
+   "resource": "DataKeyAlias",
+   "type": "AWS::KMS::Alias",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "data",
+   "resource": "Database",
+   "type": "AWS::RDS::DBInstance",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "data",
+   "resource": "DatabaseParameters",
+   "type": "AWS::RDS::DBParameterGroup",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "data",
+   "resource": "DatabaseSubnets",
+   "type": "AWS::RDS::DBSubnetGroup",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "data",
+   "resource": "SearchDomain",
+   "type": "AWS::OpenSearchService::Domain",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "data",
+   "resource": "UploadsBucket",
+   "type": "AWS::S3::Bucket",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "data",
+   "resource": "UploadsBucketPolicy",
+   "type": "AWS::S3::BucketPolicy",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "observability",
+   "resource": "AlarmTopic",
+   "type": "AWS::SNS::Topic",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "observability",
+   "resource": "AppLogGroup",
+   "type": "AWS::Logs::LogGroup",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "observability",
+   "resource": "Grafana",
+   "type": "AWS::Grafana::Workspace",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "observability",
+   "resource": "GrafanaRole",
+   "type": "AWS::IAM::Role",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "AuthSecret",
+   "type": "AWS::SecretsManager::Secret",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "Cluster",
+   "type": "AWS::ECS::Cluster",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "CpuScaling",
+   "type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "DatabaseCpuAlarm",
+   "type": "AWS::CloudWatch::Alarm",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "ErasureKey",
+   "type": "AWS::SecretsManager::Secret",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "ExecutionRole",
+   "type": "AWS::IAM::Role",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "Http5xxAlarm",
+   "type": "AWS::CloudWatch::Alarm",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "HttpListener",
+   "type": "AWS::ElasticLoadBalancingV2::Listener",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "LoadBalancer",
+   "type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "Repository",
+   "type": "AWS::ECR::Repository",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "RequestScaling",
+   "type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "ScalableTarget",
+   "type": "AWS::ApplicationAutoScaling::ScalableTarget",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "SearchRedAlarm",
+   "type": "AWS::CloudWatch::Alarm",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "Service",
+   "type": "AWS::ECS::Service",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "SlowAnswersAlarm",
+   "type": "AWS::CloudWatch::Alarm",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "TargetGroup",
+   "type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "TaskDefinition",
+   "type": "AWS::ECS::TaskDefinition",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "TaskRole",
+   "type": "AWS::IAM::Role",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  },
+  {
+   "stack": "app",
+   "resource": "UnhealthyTasksAlarm",
+   "type": "AWS::CloudWatch::Alarm",
+   "status": "CREATE_COMPLETE",
+   "exists": true
+  }
+ ]
+}
